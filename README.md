@@ -7,10 +7,15 @@
 **The documentation site for [TessariDB](https://github.com/TessariDB/TessariDB)
 — and the first thing built on it.**
 
-[![licence](https://img.shields.io/badge/licence-Apache--2.0-6B5FD1)](LICENSE)
-[![status](https://img.shields.io/badge/status-planned-9A93C4)](#status)
+[![status](https://img.shields.io/badge/status-planned-9A93C4?style=flat-square)](#status)
+[![licence](https://img.shields.io/badge/licence-Apache--2.0-6B5FD1?style=flat-square)](LICENSE)
 
 </div>
+
+> [!WARNING]
+> **Nothing here is built yet.** The repository holds the decided shape of the
+> site and no engine code. It is published early so that the design is on the
+> record before the first line is written. See [**Status**](#status).
 
 ---
 
@@ -41,8 +46,13 @@ more honest claim about the engine than any benchmark table.
 
 ## Status
 
-**Planned.** The repository exists, the shape is decided, and no engine code is
-written yet. Nothing here works today.
+**Stage: planned.** The repository exists, the shape above is decided, and no
+engine code is written yet. Nothing here works today.
+
+- ⛔ **Not started:** the HTTP server, the ingest, the search route, the theme.
+- 🚧 **Blocked on:** TessariDB's full-text engine reaching the point where a site
+  can be served from it — this site is the first thing built on the database, so
+  it follows rather than leads.
 
 ## Licence
 
