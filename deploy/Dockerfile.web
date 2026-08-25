@@ -42,9 +42,18 @@ ENV NODE_ENV=production \
 
 EXPOSE 3000
 
-# The site's own front page, which it can only render if it reached the API —
-# so this checks the pair rather than whether node is running.
+# Healthy means "this front end is answering", not "this site has a home page".
+# `curl -f` fails on any 4xx, and `/` is a 404 while the store is empty — which
+# is the site's normal first state, so the obvious check reports a working
+# container as sick and keeps doing it until somebody writes a page. What is
+# worth failing on is no answer at all, or a 5xx: when the API is unreachable the
+# front end returns one, and that is the dependency failure this should catch.
+# Both bounds are load-bearing. Without the lower one a refused connection is
+# healthy, because curl reports `000` for a request that never happened and
+# `000` is less than 500 — a dead server passing the check that exists to find
+# it.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:3000/ >/dev/null || exit 1
+  CMD code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ || echo 000); \
+      [ "$code" -ge 200 ] && [ "$code" -lt 500 ]
 
 CMD ["node", "server.js"]
