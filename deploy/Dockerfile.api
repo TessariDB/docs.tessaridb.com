@@ -1,14 +1,14 @@
-# The database and the site's API, in one image.
+# The site's API, and nothing else.
 #
-# Two processes in one container, which is a thing to justify rather than to
-# assume. They are together because they are one unit of failure and one unit of
-# state: the API is useless without its store, the store here serves nothing
-# else, and the wire protocol between them carries no TLS — so putting a network
-# between them would be putting an unencrypted database protocol on a network
-# for no gain. What is separated is the front end, which is the part that faces
-# the public and the part that has a different reason to be restarted.
+# It carries no engine binary and builds no engine: the database is its own
+# image (`Dockerfile.db`), reached over the compose network. That is what keeps
+# this image buildable in a couple of minutes while the one that compiles a
+# vendored RocksDB is rebuilt only when the engine revision moves.
 #
-# The store's data directory is a volume, so the content outlives the container.
+# There is no start script. Everything this needs — the node's address, the
+# namespace, the bind address, and the two identities it signs in as — arrives
+# through the environment, so the container runs one process and Docker does the
+# supervising that a shell used to do badly.
 
 # ── build ───────────────────────────────────────────────────────────────────
 FROM rust:1.98-slim-bookworm AS build
@@ -36,69 +36,36 @@ COPY crates ./crates
 # whole reason this is a mount and not a build argument.
 RUN --mount=type=ssh cargo build --release --workspace --locked
 
-# ── the node ────────────────────────────────────────────────────────────────
-# Built from source in a stage of its own so that the version of the engine this
-# image runs is pinned in one place and is visible in the build log. The build
-# argument is a branch, a tag, or a commit of the engine repository.
-FROM rust:1.98-slim-bookworm AS engine
-ARG TESSARIDB_REF=dev
-# `clang` and `libclang-dev` because the storage engine's bindings are generated
-# by bindgen, which loads libclang at build time and panics without it; the C++
-# toolchain because the same crate compiles a vendored RocksDB from source.
-# None of this is needed by the API's own build, which is why it is only here.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      git ca-certificates openssh-client \
-      clang libclang-dev build-essential \
- && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p -m 0700 /root/.ssh \
- && ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null
-WORKDIR /engine
-# Fetched rather than cloned, because `git clone --branch` takes a branch or a
-# tag and refuses a commit — and a commit is exactly what a deployment should
-# name. `fetch` accepts all three, so this line does not care which one it was
-# given. `rev-parse` then puts the resolved commit in the build log, where the
-# question "which engine is this image running" is answered without guessing.
-RUN --mount=type=ssh git init -q . \
- && git remote add origin git@github.com:TessariDB/TessariDB.git \
- && git fetch -q --depth 1 origin "${TESSARIDB_REF}" \
- && git checkout -q FETCH_HEAD \
- && echo "engine revision: $(git rev-parse HEAD)" \
- && cargo build --release -p tessari-cli --bin tessaridb --locked
-
 # ── run ─────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
+# `curl` for the health check below. The uid matches the database image's, which
+# costs nothing and means the two never disagree about who owns what if a future
+# change hands them a shared path.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tini curl \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --system --uid 10001 --home /var/lib/tessaridb docs \
- && mkdir -p /var/lib/tessaridb \
- && chown docs:docs /var/lib/tessaridb
+ && useradd --system --uid 10001 --home /srv docs
 
-COPY --from=engine /engine/target/release/tessaridb /usr/local/bin/tessaridb
-COPY --from=build  /build/target/release/docs       /usr/local/bin/docs
-COPY deploy/start-api.sh /usr/local/bin/start-api
-RUN chmod +x /usr/local/bin/start-api
+COPY --from=build /build/target/release/docs /usr/local/bin/docs
 
 USER docs
 WORKDIR /srv
-ENV TESSARIDB_STORE=/var/lib/tessaridb/store \
-    TESSARIDB_ADDRESS=127.0.0.1:7654 \
+ENV TESSARIDB_ADDRESS=db:7654 \
     DOCS_BIND=0.0.0.0:8080 \
     DOCS_NAMESPACE=v0_0_1_alpha \
     RUST_LOG=info
 
-VOLUME ["/var/lib/tessaridb"]
 EXPOSE 8080
 
-# tini, because this container runs two processes and the shell that supervises
-# them is PID 1 by default — which does not reap and does not forward signals,
-# so `docker stop` would kill the store rather than stop it.
+# tini even for one process, because that process is PID 1 — and PID 1 does not
+# receive a signal it has no handler for. Without it `docker stop` would wait
+# out its grace period and then kill this rather than stop it.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/usr/local/bin/start-api"]
+CMD ["/usr/local/bin/docs", "serve"]
 
-# The API's own health route, which answers only if it can reach the store —
-# so this checks the pair, which is the unit this container actually is.
-HEALTHCHECK --interval=15s --timeout=3s --start-period=40s --retries=3 \
+# Answers only if it can reach the store and sign in, so this is the check that
+# proves the pair actually talk — the database's own check can only prove that
+# it is listening.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1

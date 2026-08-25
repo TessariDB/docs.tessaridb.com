@@ -1,13 +1,11 @@
 #!/bin/bash
-# Starts the store, then the API, in one container.
+# Starts the node, and declares the store's three accounts on a fresh store.
 #
-# The order matters and the waiting is not optional: `docs serve` asks the store
-# what it holds before it binds, so starting both at once is a race, and a race
-# that loses looks like a store that is unreachable rather than one that is not
-# up yet.
+# The declaration lives here rather than with the API because it is the store's
+# own business: it needs the `tessaridb` CLI, and keeping that in the API image
+# would keep the API coupled to the engine build the split exists to separate.
 #
-# bash rather than sh for `wait -n` and `/dev/tcp`, both of which are used below
-# and neither of which dash has.
+# bash rather than sh for `/dev/tcp`, which dash does not have.
 set -euo pipefail
 
 STORE="${TESSARIDB_STORE:?where the store lives}"
@@ -16,23 +14,29 @@ STORE="${TESSARIDB_STORE:?where the store lives}"
 ADDRESS="${TESSARIDB_ADDRESS:?the wire address of the store}"
 NAMESPACE="${DOCS_NAMESPACE:?the documentation version}"
 
-HOST="${ADDRESS%%:*}"
 PORT="${ADDRESS##*:}"
+# The node binds whatever it was told, usually every interface so the API's
+# container can reach it. This script talks to it over loopback regardless.
+LOCAL="127.0.0.1:${PORT}"
 
-log() { printf 'start-api: %s\n' "$*" >&2; }
+# What the health check looks for. Deliberately not on the volume: it says "this
+# container has finished starting", not "this store has been bootstrapped", so
+# it must disappear when the container does. The idempotency of the declaration
+# below is a property of the store, not of any file.
+READY=/tmp/store-ready
 
-# ── the store ───────────────────────────────────────────────────────────────
+log() { printf 'start-db: %s\n' "$*" >&2; }
+
+rm -f "${READY}"
 
 log "starting the node on ${ADDRESS} over ${STORE}"
 tessaridb "${STORE}" --serve "${ADDRESS}" &
 NODE=$!
 
-# Stopping this container must stop the node, not orphan it. tini is PID 1 and
-# forwards the signal here; this forwards it on and waits, so the node gets its
-# chance to close the store rather than being killed with it half-written.
+# Stopping this container must close the store, not kill it half-written. tini
+# is PID 1 and forwards the signal here; this forwards it on and waits.
 stop() {
   log "stopping"
-  kill -TERM "${API:-}" 2>/dev/null || true
   kill -TERM "${NODE}" 2>/dev/null || true
   wait 2>/dev/null || true
   exit 0
@@ -40,7 +44,7 @@ stop() {
 trap stop TERM INT
 
 waited=0
-until (exec 3<>"/dev/tcp/${HOST}/${PORT}") 2>/dev/null; do
+until (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; do
   kill -0 "${NODE}" 2>/dev/null || { log "the node exited while starting"; exit 1; }
   if [ "${waited}" -ge 60 ]; then
     log "the node did not accept connections in 60s"
@@ -65,8 +69,8 @@ log "the node is accepting connections after ${waited}s"
 #   reader  a `viewer`, which the public read path runs as. A closed store has
 #           no anonymous access at all, so without this the site serves nothing;
 #           and because it is a viewer, a write on the read path is refused by
-#           the store rather than by the server's routing.
-#   editor  writes. Ingest and the API's PUT and DELETE run as this.
+#           the store rather than by the API's routing.
+#   editor  writes. The seed and the API's PUT and DELETE run as this.
 #
 # This runs at most once **by construction** rather than by remembering: the
 # owner's declaration closes the store, so a second start's anonymous attempt is
@@ -79,19 +83,11 @@ log "the node is accepting connections after ${waited}s"
 if [ -n "${DOCS_OWNER_PASSWORD:-}" ] \
 && [ -n "${DOCS_READER_PASSWORD:-}" ] \
 && [ -n "${DOCS_EDITOR_PASSWORD:-}" ]; then
-  # Exported, not just assigned. `docs serve` below reads `DOCS_READER_USER`
-  # from the environment to decide who the public reads run as — so defaulting
-  # the name here and not putting it back would declare an account called
-  # `reader` and then serve anonymously, which a closed store refuses. The
-  # symptom is a site that starts cleanly and 403s every page.
-  export DOCS_OWNER_USER="${DOCS_OWNER_USER:-owner}"
-  export DOCS_READER_USER="${DOCS_READER_USER:-reader}"
-  export DOCS_EDITOR_USER="${DOCS_EDITOR_USER:-editor}"
-  OWNER="${DOCS_OWNER_USER}"
-  READER="${DOCS_READER_USER}"
-  EDITOR="${DOCS_EDITOR_USER}"
+  OWNER="${DOCS_OWNER_USER:-owner}"
+  READER="${DOCS_READER_USER:-reader}"
+  EDITOR="${DOCS_EDITOR_USER:-editor}"
 
-  if tessaridb --at "${ADDRESS}" -e "
+  if tessaridb --at "${LOCAL}" -e "
         DEFINE NAMESPACE IF NOT EXISTS ${NAMESPACE};
         USE NAMESPACE ${NAMESPACE};
         DEFINE DATABASE IF NOT EXISTS docs;
@@ -102,7 +98,7 @@ if [ -n "${DOCS_OWNER_PASSWORD:-}" ] \
     # From here the owner must sign in, because the statement above took effect
     # the moment it committed.
     TESSARIDB_PASSWORD="${DOCS_OWNER_PASSWORD}" tessaridb \
-      --at "${ADDRESS}" --user "${OWNER}" -e "
+      --at "${LOCAL}" --user "${OWNER}" -e "
         USE NAMESPACE ${NAMESPACE};
         USE DATABASE docs;
         DEFINE USER ${READER} ON ${NAMESPACE}.docs ROLE viewer PASSWORD '${DOCS_READER_PASSWORD}';
@@ -118,28 +114,10 @@ else
   log "run anything for anybody who reaches ${ADDRESS}. Development only."
 fi
 
-# ── the API ─────────────────────────────────────────────────────────────────
-#
-# It signs in as the editor, so that a store which is empty and has a tree beside
-# it can be seeded, and it reads as `DOCS_READER_USER`, which is already in the
-# environment. The image ships no tree, so ordinarily nothing is written here and
-# the pages arrive through the API.
+# Only now. The API waits on this container's health, and what it is really
+# waiting for is an account to sign in as — a store that is listening but has no
+# users yet would let it connect anonymously and then refuse it a moment later.
+touch "${READY}"
+log "ready"
 
-log "starting the API"
-DOCS_USER="${DOCS_EDITOR_USER:-editor}" \
-DOCS_PASSWORD="${DOCS_EDITOR_PASSWORD:-}" \
-  docs serve --at "${ADDRESS}" &
-API=$!
-
-# Whichever exits first takes the container with it. A container still running
-# with half of itself dead is one whose health check may keep passing and that
-# nobody thinks to look at.
-#
-# Polled rather than `wait -n`, which wants bash 4.3 — this script is worth
-# being able to run outside the image, and a one-second poll on a process that
-# is expected to run for weeks costs nothing.
-while kill -0 "${NODE}" 2>/dev/null && kill -0 "${API}" 2>/dev/null; do
-  sleep 1
-done
-log "a process exited; stopping the other"
-stop
+wait "${NODE}"

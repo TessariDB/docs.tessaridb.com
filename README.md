@@ -38,7 +38,7 @@ about the engine than any benchmark table.
 | **Navigation** | the section tree is a graph in the store, walked with `RELATE` edges |
 | **Versions** | a namespace per released version, so the doc set is versioned the way the database is |
 | **Front end** | Next.js, server-rendered per request. It holds no content and never talks to the store |
-| **Deploy** | two containers — database + API together, front end apart — and a folder on the host |
+| **Deploy** | three containers — database, API, front end — and a folder on the host |
 
 ## Running it
 
@@ -113,9 +113,9 @@ path is then refused by the *store*, whatever this server believes it is doing.
 
 > [!WARNING]
 > The wire protocol carries no TLS, and Basic sends the password as given. The
-> compose file keeps the API on an internal network with only the front end
-> exposed. If you publish the API, put something that terminates TLS in front of
-> it.
+> compose file puts the database and the API on a network declared `internal`
+> and publishes only the front end. If you publish the API, put something that
+> terminates TLS in front of it.
 
 ## What is true here
 

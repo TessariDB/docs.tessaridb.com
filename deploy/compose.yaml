@@ -1,7 +1,14 @@
-# Two containers and one folder on the host.
+# Three containers and one folder on the host.
 #
-#   docs-api   the database and the site's API, together
+#   docs-db    the database
+#   docs-api   the site's API
 #   docs-web   the front end
+#
+# The database is separate from the API for two unrelated reasons. Failure: when
+# they shared a container a script supervised both, and either one exiting took
+# the other down, so an API crash stopped the database. Build: the database
+# image compiles a vendored RocksDB and takes forty minutes, while the API
+# changes far more often and now rebuilds in a couple of minutes.
 #
 # The store's directory is bound to a folder on the host, so the content
 # survives the container — and so that a backup is a copy of a directory rather
@@ -15,7 +22,7 @@
 name: tessaridb-docs
 
 # Docker's json-file driver keeps everything a container has ever said unless it
-# is told otherwise, and both services below restart themselves forever. On an
+# is told otherwise, and every service below restarts itself forever. On an
 # unattended host that is a disk that fills quietly over months and takes the
 # site down for a reason that has nothing to do with the site. Fifty megabytes
 # per service is more log than anyone reads and far less than anyone misses.
@@ -26,27 +33,31 @@ x-logging: &logging
     max-file: "5"
 
 services:
-  api:
+  db:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile.api
-      # The engine and the client SDK are private repositories, so the build
-      # authenticates with the forwarded agent rather than with a token baked
-      # into a layer. Requires an agent holding a key GitHub accepts.
+      dockerfile: deploy/Dockerfile.db
+      # The engine repository is private, so the build authenticates with the
+      # forwarded agent rather than with a token baked into a layer. Requires an
+      # agent holding a key GitHub accepts.
       ssh:
         - default
       args:
         # Which revision of the engine this image runs. A commit here rather
         # than a branch is what makes rebuilding an old image give back the old
         # engine; a branch gives whatever it pointed at on the day of the build.
-        # It doubles as the cache key for the clone-and-compile layer, so moving
+        # It doubles as the cache key for the fetch-and-compile layer, so moving
         # it is also how a rebuild is made to actually fetch the engine again.
         TESSARIDB_REF: ${TESSARIDB_REF:-dev}
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
-      TESSARIDB_ADDRESS: 127.0.0.1:7654
-      DOCS_BIND: 0.0.0.0:8080
+      # Every interface, because the API is now in a different container. That
+      # is the one thing this split widens: the wire protocol carries no TLS, so
+      # the network it is on is declared `internal` below.
+      TESSARIDB_ADDRESS: 0.0.0.0:7654
       DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_1_alpha}
+      # The accounts are declared here, by the container that owns the store —
+      # which is also what lets the API image drop the engine binary entirely.
       DOCS_OWNER_USER: ${DOCS_OWNER_USER:-owner}
       DOCS_OWNER_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
       DOCS_READER_USER: ${DOCS_READER_USER:-reader}
@@ -55,15 +66,56 @@ services:
       DOCS_EDITOR_PASSWORD: ${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
-      # The host folder. Everything the site is lives here.
+      # The host folder. Everything the site is lives here. Its ownership must
+      # be the image's uid 10001: a bind mount presents the host's ownership and
+      # shadows the image's own, and the symptom of getting it wrong is a
+      # database that cannot open its store.
       - ${DOCS_STORE_PATH:-./store}:/var/lib/tessaridb
-    # No `ports`. The API and the store are reachable only from the other
-    # container on this network — which is what makes it acceptable that the
-    # wire protocol has no TLS and that the API takes a password over Basic.
-    # Publishing 8080 would put both on the host's network; do it only
-    # deliberately, and only behind something that terminates TLS.
+    # No `ports`. Nothing outside the store network reaches the database.
+    expose:
+      - "7654"
+    networks:
+      - store
+    restart: unless-stopped
+    logging: *logging
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+      # The client SDK is a private repository; same reason as above.
+      ssh:
+        - default
+    environment:
+      # The service name, not loopback: the database is a different container.
+      TESSARIDB_ADDRESS: db:7654
+      DOCS_BIND: 0.0.0.0:8080
+      DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_1_alpha}
+      # Two identities, and the difference is the point. Writes run as the
+      # editor; public reads run as the reader, which is a `viewer`, so a write
+      # attempted on the read path is refused by the store rather than by this
+      # server's routing.
+      DOCS_USER: ${DOCS_EDITOR_USER:-editor}
+      DOCS_PASSWORD: ${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}
+      DOCS_READER_USER: ${DOCS_READER_USER:-reader}
+      DOCS_READER_PASSWORD: ${DOCS_READER_PASSWORD:?set it in deploy/.env}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      db:
+        # Waits for the store to be listening *and* to have declared its
+        # accounts. Without the second half the API could connect to an open
+        # store and be refused a moment later, when the owner's declaration
+        # closes it.
+        condition: service_healthy
+    # No `ports`. The API is reachable only from the front end's container.
+    # Publishing 8080 would put it on the host's network, where Basic over plain
+    # HTTP would carry the editor's password; do it only deliberately, and only
+    # behind something that terminates TLS.
     expose:
       - "8080"
+    networks:
+      - store
+      - edge
     restart: unless-stopped
     logging: *logging
 
@@ -72,20 +124,33 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.web
     environment:
-      # The service name, not localhost: this resolves on the compose network.
       DOCS_API: http://api:8080
     ports:
       # Loopback by default. The public edge is a TLS terminator on the host,
       # which is what holds the certificate and what 80 and 443 reach; binding
       # this to every interface would publish an HTTP origin beside it that
       # answers on the same name without one, and nothing would report that.
+      # Docker writes its own firewall rules ahead of ufw's, so this prefix is a
+      # control and not a preference — widen it and ufw will keep saying deny.
       - "${DOCS_WEB_BIND:-127.0.0.1:3000}:3000"
     depends_on:
       api:
-        # Waits for the API's health check, which itself only passes once the
-        # API can reach the store. Without this the front end's first requests
-        # land while the store is still opening and the reader sees an empty
-        # tree that a refresh fixes — the kind of fault nobody reports.
+        # The API's health route answers only once it can reach the store, so
+        # this waits for the whole chain. Without it the front end's first
+        # requests land while the store is still opening and the reader sees an
+        # empty tree that a refresh fixes — the kind of fault nobody reports.
         condition: service_healthy
+    networks:
+      - edge
     restart: unless-stopped
     logging: *logging
+
+networks:
+  # The database's network. `internal` because nothing on it has any reason to
+  # reach the internet, and because an unencrypted database protocol should be
+  # on as small a network as it can be.
+  store:
+    internal: true
+  # Where the front end's published port lives. Not internal: publishing a port
+  # onto an internal network does not work.
+  edge: {}
