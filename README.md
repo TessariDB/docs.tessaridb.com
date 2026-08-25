@@ -61,6 +61,14 @@ cargo run -p docs-cli -- serve                 # the API, on :8080
 cd frontend && DOCS_API=http://127.0.0.1:8080 npm run dev
 ```
 
+### The public edge
+
+Neither container publishes a port to the world: the front end binds loopback
+and the API is only on the compose network. Something in front terminates TLS
+and proxies to `127.0.0.1:3000`, and the nginx that does it here is in
+[`deploy/nginx/`](deploy/nginx) rather than only on the host — an edge that
+exists nowhere but on the machine is an edge that a rebuild loses.
+
 ## Who owns the content
 
 **The store does**, and it is the only thing that does. The pages are records; a
