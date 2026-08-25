@@ -18,7 +18,7 @@
 # it is also the cache key for this stage, so moving it is what makes a rebuild
 # actually fetch the engine again.
 FROM rust:1.98-slim-bookworm AS engine
-ARG TESSARIDB_REF=dev
+ARG TESSARIDB_REF=135495e5180f90d74556de2717506f7ba6b69d85
 # `clang` and `libclang-dev` because the storage engine's bindings are generated
 # by bindgen, which loads libclang at build time and panics without it; the C++
 # toolchain because the same crate compiles a vendored RocksDB from source.

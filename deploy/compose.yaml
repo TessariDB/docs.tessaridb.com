@@ -48,7 +48,7 @@ services:
         # engine; a branch gives whatever it pointed at on the day of the build.
         # It doubles as the cache key for the fetch-and-compile layer, so moving
         # it is also how a rebuild is made to actually fetch the engine again.
-        TESSARIDB_REF: ${TESSARIDB_REF:-dev}
+        TESSARIDB_REF: ${TESSARIDB_REF:-135495e5180f90d74556de2717506f7ba6b69d85}
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is now in a different container. That
