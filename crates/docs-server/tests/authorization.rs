@@ -267,6 +267,51 @@ async fn guessing_is_bounded() {
 }
 
 #[tokio::test]
+async fn a_write_is_refused_before_its_body_is_read() {
+    let Some((site, _alone)) = site("t_auth_body_after_token").await else {
+        return;
+    };
+
+    // A body that cannot parse, presented with no token. The refusal has to be
+    // about the token. A `400` here would mean two things, both wrong: the
+    // parser ran for somebody who had not identified themselves, and the status
+    // told them whether their body was well-formed — which is a question no
+    // anonymous caller should be able to ask of a write route.
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/page/scratch")
+        .body(Body::from("no front matter at all\n"))
+        .expect("a request");
+    let (status, body) = send(&site, request).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    // The section route takes JSON, and its parse failure is `serde`'s own
+    // message — a description of the shape the route expects. That is a worse
+    // thing to hand out anonymously than the page route's, so it is asserted
+    // separately rather than assumed to follow.
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/section/scratch")
+        .body(Body::from("{ not json"))
+        .expect("a request");
+    let (status, body) = send(&site, request).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    // And the validation itself still works for somebody who has identified
+    // themselves — the point is the order, not the removal of the check.
+    let (_, body) = send(&site, sign_in(Some(&basic("ann", PASSWORD)))).await;
+    let token = token_of(&body);
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/page/scratch")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::from("no front matter at all\n"))
+        .expect("a request");
+    let (status, body) = send(&site, request).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
 async fn a_read_needs_nothing_at_all() {
     let Some((site, _alone)) = site("t_auth_reads_are_public").await else {
         return;

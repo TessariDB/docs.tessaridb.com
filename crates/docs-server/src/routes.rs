@@ -162,6 +162,14 @@ async fn put_page(
     headers: HeaderMap,
     source: String,
 ) -> Response {
+    // The token first, and the body only after it. The other order runs the
+    // parser for a caller who has not identified themselves, and answers — in
+    // the status — whether their body was well-formed, which is a question no
+    // anonymous caller should get to ask of a write route.
+    let mut store = match session::authorized(&site, &headers).await {
+        Ok(store) => store,
+        Err(refusal) => return *refusal,
+    };
     // The body is the page's source — front matter and Markdown, exactly what
     // lives in `content/`. One format for an editor and for the repository, so a
     // page written through the API can be committed and a page committed can be
@@ -170,10 +178,6 @@ async fn put_page(
     let page = match parse(&slug, &source) {
         Ok(page) => page,
         Err(fault) => return message(StatusCode::BAD_REQUEST, &fault.to_string()),
-    };
-    let mut store = match session::authorized(&site, &headers).await {
-        Ok(store) => store,
-        Err(refusal) => return *refusal,
     };
     match store.put_page(&page).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -203,6 +207,13 @@ async fn put_section(
     headers: HeaderMap,
     body: String,
 ) -> Response {
+    // As on the page route: the token before the body. This one matters a
+    // little more, because the refusal below is `serde`'s own message and so
+    // describes the shape the route wants.
+    let mut store = match session::authorized(&site, &headers).await {
+        Ok(store) => store,
+        Err(refusal) => return *refusal,
+    };
     let asked: SectionBody = match serde_json::from_str(&body) {
         Ok(asked) => asked,
         Err(fault) => return message(StatusCode::BAD_REQUEST, &fault.to_string()),
@@ -213,10 +224,6 @@ async fn put_section(
         parent: asked.parent,
         order: asked.order,
         icon: asked.icon,
-    };
-    let mut store = match session::authorized(&site, &headers).await {
-        Ok(store) => store,
-        Err(refusal) => return *refusal,
     };
     match store.put_section(&section).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
