@@ -1,0 +1,20 @@
+# What must never reach a build context.
+#
+# `target/` and `node_modules/` are gigabytes and are rebuilt inside the image
+# anyway, so sending them costs the whole build a slow upload and buys nothing.
+# The rest is either secret or local state.
+
+target/
+**/target/
+frontend/node_modules/
+frontend/.next/
+deploy/.env
+deploy/store/
+.git/
+.githooks/
+.bgv/
+CLAUDE.md
+AGENTS.md
+MEMORY.md
+.DS_Store
+.playwright-mcp/

@@ -13,5 +13,11 @@ CLAUDE.md
 AGENTS.md
 MEMORY.md
 
+# The deployment's own secrets and its store. `.env` carries the three account
+# passwords and `store/` is the database itself — neither belongs in a public
+# repository, and the example file is what is committed in `.env`'s place.
+deploy/.env
+deploy/store/
+
 # macOS
 .DS_Store

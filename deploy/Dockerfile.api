@@ -1,0 +1,80 @@
+# The database and the site's API, in one image.
+#
+# Two processes in one container, which is a thing to justify rather than to
+# assume. They are together because they are one unit of failure and one unit of
+# state: the API is useless without its store, the store here serves nothing
+# else, and the wire protocol between them carries no TLS — so putting a network
+# between them would be putting an unencrypted database protocol on a network
+# for no gain. What is separated is the front end, which is the part that faces
+# the public and the part that has a different reason to be restarted.
+#
+# The store's data directory is a volume, so the content outlives the container.
+
+# ── build ───────────────────────────────────────────────────────────────────
+FROM rust:1.98-slim-bookworm AS build
+
+# `git` because the client SDK is a git dependency and cargo is told to fetch
+# with the CLI (see .cargo/config.toml — libgit2 fails auth against the public
+# repository where the git binary succeeds).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo ./.cargo
+COPY crates ./crates
+RUN cargo build --release --workspace --locked
+
+# ── the node ────────────────────────────────────────────────────────────────
+# Built from source in a stage of its own so that the version of the engine this
+# image runs is pinned in one place and is visible in the build log. The build
+# argument is a tag or a revision of the engine repository.
+FROM rust:1.98-slim-bookworm AS engine
+ARG TESSARIDB_REF=dev
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /engine
+RUN git clone --depth 1 --branch "${TESSARIDB_REF}" \
+      https://github.com/TessariDB/TessariDB.git . \
+ && cargo build --release -p tessari-cli --bin tessaridb --locked
+
+# ── run ─────────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tini curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 --home /var/lib/tessaridb docs \
+ && mkdir -p /var/lib/tessaridb \
+ && chown docs:docs /var/lib/tessaridb
+
+COPY --from=engine /engine/target/release/tessaridb /usr/local/bin/tessaridb
+COPY --from=build  /build/target/release/docs       /usr/local/bin/docs
+COPY content /srv/content
+COPY deploy/start-api.sh /usr/local/bin/start-api
+RUN chmod +x /usr/local/bin/start-api
+
+USER docs
+WORKDIR /srv
+ENV DOCS_CONTENT=/srv/content \
+    TESSARIDB_STORE=/var/lib/tessaridb/store \
+    TESSARIDB_ADDRESS=127.0.0.1:7654 \
+    DOCS_BIND=0.0.0.0:8080 \
+    DOCS_NAMESPACE=v0_0_1_alpha \
+    RUST_LOG=info
+
+VOLUME ["/var/lib/tessaridb"]
+EXPOSE 8080
+
+# tini, because this container runs two processes and the shell that supervises
+# them is PID 1 by default — which does not reap and does not forward signals,
+# so `docker stop` would kill the store rather than stop it.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/usr/local/bin/start-api"]
+
+# The API's own health route, which answers only if it can reach the store —
+# so this checks the pair, which is the unit this container actually is.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=40s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1

@@ -1,0 +1,67 @@
+# Two containers and one folder on the host.
+#
+#   docs-api   the database and the site's API, together
+#   docs-web   the front end
+#
+# The store's directory is bound to a folder on the host, so the content
+# survives the container — and so that a backup is a copy of a directory rather
+# than an operation somebody has to remember how to perform.
+#
+#   cp deploy/.env.example deploy/.env    # then set the three passwords
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
+#
+# The site is then on http://localhost:3000.
+
+name: tessaridb-docs
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+      args:
+        # Which revision of the engine this image runs. Pinned here rather than
+        # floating, so that rebuilding an old image gives the old engine.
+        TESSARIDB_REF: ${TESSARIDB_REF:-dev}
+    environment:
+      TESSARIDB_STORE: /var/lib/tessaridb/store
+      TESSARIDB_ADDRESS: 127.0.0.1:7654
+      DOCS_BIND: 0.0.0.0:8080
+      DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_1_alpha}
+      DOCS_CONTENT: /srv/content
+      DOCS_OWNER_USER: ${DOCS_OWNER_USER:-owner}
+      DOCS_OWNER_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
+      DOCS_READER_USER: ${DOCS_READER_USER:-reader}
+      DOCS_READER_PASSWORD: ${DOCS_READER_PASSWORD:?set it in deploy/.env}
+      DOCS_EDITOR_USER: ${DOCS_EDITOR_USER:-editor}
+      DOCS_EDITOR_PASSWORD: ${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      # The host folder. Everything the site is lives here.
+      - ${DOCS_STORE_PATH:-./store}:/var/lib/tessaridb
+    # No `ports`. The API and the store are reachable only from the other
+    # container on this network — which is what makes it acceptable that the
+    # wire protocol has no TLS and that the API takes a password over Basic.
+    # Publishing 8080 would put both on the host's network; do it only
+    # deliberately, and only behind something that terminates TLS.
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    environment:
+      # The service name, not localhost: this resolves on the compose network.
+      DOCS_API: http://api:8080
+    ports:
+      - "${DOCS_WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        # Waits for the API's health check, which itself only passes once the
+        # API can reach the store. Without this the front end's first requests
+        # land while the store is still opening and the reader sees an empty
+        # tree that a refresh fixes — the kind of fault nobody reports.
+        condition: service_healthy
+    restart: unless-stopped

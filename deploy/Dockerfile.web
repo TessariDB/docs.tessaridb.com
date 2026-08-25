@@ -1,0 +1,50 @@
+# The front end.
+#
+# Separate from the API because it is the part that faces the public, and
+# because it is the part with its own reason to be restarted — a change to the
+# theme should not close the store.
+#
+# It holds no content and no credentials. Everything it shows it fetched from
+# the API, over the internal network, at request time.
+
+# ── build ───────────────────────────────────────────────────────────────────
+FROM node:24-bookworm-slim AS build
+
+WORKDIR /build
+# The lockfile alone first, so that a change to a component does not reinstall
+# the dependency tree.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY frontend/ ./
+# `standalone` output: the server plus only the dependencies it actually
+# reached, rather than node_modules entire.
+RUN npm run build
+
+# ── run ─────────────────────────────────────────────────────────────────────
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# `node` already exists in this image, uid 1000, and is not root.
+USER node
+WORKDIR /srv
+
+COPY --from=build --chown=node:node /build/.next/standalone ./
+COPY --from=build --chown=node:node /build/.next/static ./.next/static
+COPY --from=build --chown=node:node /build/public ./public
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+EXPOSE 3000
+
+# The site's own front page, which it can only render if it reached the API —
+# so this checks the pair rather than whether node is running.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:3000/ >/dev/null || exit 1
+
+CMD ["node", "server.js"]
