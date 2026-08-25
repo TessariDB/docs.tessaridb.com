@@ -33,7 +33,7 @@ about the engine than any benchmark table.
 | | |
 |---|---|
 | **Engine** | Rust — a small HTTP server, not a static generator |
-| **Content** | records in TessariDB. `content/` seeds an empty store; after that the store is the source |
+| **Content** | records in TessariDB, written through the API. Not in this repository |
 | **Search** | TessariDB full-text: one analyzed field, one index, `search::score` ranking |
 | **Navigation** | the section tree is a graph in the store, walked with `RELATE` edges |
 | **Versions** | a namespace per released version, so the doc set is versioned the way the database is |
@@ -50,8 +50,8 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
 ```
 
 The site is then on <http://localhost:3000>. A fresh store declares its three
-accounts, applies the schema and seeds itself from `content/` on the first
-start; every start after that reads what is there.
+accounts and applies the schema on the first start, and comes up with no pages;
+they are written through the API. Every start after that reads what is there.
 
 ### Without containers
 
@@ -61,20 +61,26 @@ cargo run -p docs-cli -- serve                 # the API, on :8080
 cd frontend && DOCS_API=http://127.0.0.1:8080 npm run dev
 ```
 
-`cargo run -p docs-cli -- check` reads `content/` and reports what is wrong with
-it without opening a connection, which is what CI runs.
-
 ## Who owns the content
 
-**The store does.** `content/` is where the corpus is written and reviewed, and
-it is what an *empty* store is seeded from — but pages are also edited through
-the API, by whoever the store lets write, and a restart that rebuilt from disk
-would discard those edits in silence. So a populated store is never rebuilt
-unless somebody asks:
+**The store does**, and it is the only thing that does. The pages are records; a
+deployment ships the schema, the accounts and no corpus, and every page arrives
+through the API afterwards.
+
+There is still a way to write a tree of Markdown in bulk, for drafting and for
+moving a corpus between stores. A `content/` directory — untracked, because a
+published site rebuilt out of somebody's stale checkout is exactly the failure
+this avoids — is read by two commands:
 
 ```sh
-docs ingest        # replace what the store holds with content/. Destructive.
+docs check         # parse the tree and report what is wrong with it. No connection.
+docs ingest        # replace what the store holds with it. Destructive.
 ```
+
+`serve` seeds from such a tree only when the store is **empty** and one happens
+to be there. It never rebuilds a populated store, because pages are edited
+through the API and a restart that rebuilt from disk would discard those edits
+in silence.
 
 ## Who may write
 

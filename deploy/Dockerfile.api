@@ -52,14 +52,12 @@ RUN apt-get update \
 
 COPY --from=engine /engine/target/release/tessaridb /usr/local/bin/tessaridb
 COPY --from=build  /build/target/release/docs       /usr/local/bin/docs
-COPY content /srv/content
 COPY deploy/start-api.sh /usr/local/bin/start-api
 RUN chmod +x /usr/local/bin/start-api
 
 USER docs
 WORKDIR /srv
-ENV DOCS_CONTENT=/srv/content \
-    TESSARIDB_STORE=/var/lib/tessaridb/store \
+ENV TESSARIDB_STORE=/var/lib/tessaridb/store \
     TESSARIDB_ADDRESS=127.0.0.1:7654 \
     DOCS_BIND=0.0.0.0:8080 \
     DOCS_NAMESPACE=v0_0_1_alpha \

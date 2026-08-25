@@ -28,7 +28,6 @@ services:
       TESSARIDB_ADDRESS: 127.0.0.1:7654
       DOCS_BIND: 0.0.0.0:8080
       DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_1_alpha}
-      DOCS_CONTENT: /srv/content
       DOCS_OWNER_USER: ${DOCS_OWNER_USER:-owner}
       DOCS_OWNER_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
       DOCS_READER_USER: ${DOCS_READER_USER:-reader}

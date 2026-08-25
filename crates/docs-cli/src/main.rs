@@ -173,12 +173,26 @@ async fn serve(asked: &Asked) -> Result<(), String> {
         (None, 0, true) => {
             // Seeded rather than rebuilt: an empty store has no edits to lose,
             // so this is the one moment where disk may speak for the store.
-            log::info!(
-                "the store is empty — seeding it from {}",
-                asked.content.display()
-            );
-            let corpus = corpus::read(&asked.content).map_err(|fault| fault.to_string())?;
-            rebuild(&mut store, &corpus).await?;
+            //
+            // No tree on disk is not a fault here. A deployment ships the schema
+            // and the accounts and nothing else, and its pages arrive through the
+            // API afterwards — so an empty store with no tree beside it is the
+            // ordinary first minute of a new site, not a misconfiguration.
+            match corpus::read(&asked.content) {
+                Ok(corpus) => {
+                    log::info!(
+                        "the store is empty — seeding it from {}",
+                        asked.content.display()
+                    );
+                    rebuild(&mut store, &corpus).await?;
+                }
+                Err(corpus::Fault::NoContent(_)) => log::info!(
+                    "the store is empty and there is no tree at {} to seed it from, \
+                     so its pages are the ones written through the API",
+                    asked.content.display()
+                ),
+                Err(fault) => return Err(fault.to_string()),
+            }
         }
         (None, 0, false) => {
             // Served rather than refused. An empty site is a poor page; a front

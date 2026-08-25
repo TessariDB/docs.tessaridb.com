@@ -120,9 +120,10 @@ fi
 
 # ── the API ─────────────────────────────────────────────────────────────────
 #
-# It signs in as the editor, because on a fresh store it seeds the content, and
-# it reads as `DOCS_READER_USER`, which is already in the environment. On every
-# later start the store is populated and nothing is written.
+# It signs in as the editor, so that a store which is empty and has a tree beside
+# it can be seeded, and it reads as `DOCS_READER_USER`, which is already in the
+# environment. The image ships no tree, so ordinarily nothing is written here and
+# the pages arrive through the API.
 
 log "starting the API"
 DOCS_USER="${DOCS_EDITOR_USER:-editor}" \
