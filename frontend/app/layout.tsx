@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 
@@ -13,6 +13,24 @@ export const metadata: Metadata = {
   title: { default: "TessariDB", template: "%s — TessariDB" },
   description:
     "Records, graphs, full-text and vectors in one store, and one language over all of them.",
+};
+
+/**
+ * Without this a phone lays the page out in a virtual viewport of about 980px
+ * and then zooms out to fit, so a `max-width: 860px` rule never matches
+ * anything and every narrow-screen style in `globals.css` is dead code. The
+ * failure is quiet in exactly the wrong way: the site looks like it was never
+ * made responsive rather than like it is missing one line.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Named so the browser's own chrome matches the theme rather than framing a
+  // dark page in a light bar.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d0d13" },
+  ],
 };
 
 export default async function Layout({ children }: { children: React.ReactNode }) {

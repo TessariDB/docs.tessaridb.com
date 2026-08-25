@@ -42,8 +42,14 @@ RUN --mount=type=ssh cargo build --release --workspace --locked
 # argument is a tag or a revision of the engine repository.
 FROM rust:1.98-slim-bookworm AS engine
 ARG TESSARIDB_REF=dev
+# `clang` and `libclang-dev` because the storage engine's bindings are generated
+# by bindgen, which loads libclang at build time and panics without it; the C++
+# toolchain because the same crate compiles a vendored RocksDB from source.
+# None of this is needed by the API's own build, which is why it is only here.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
+ && apt-get install -y --no-install-recommends \
+      git ca-certificates openssh-client \
+      clang libclang-dev build-essential \
  && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p -m 0700 /root/.ssh \
  && ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null

@@ -527,6 +527,37 @@ a:hover {
   border-color: var(--border-strong);
 }
 
+/* The disclosure that opens the tree on a narrow screen. Hidden above 860px,
+   where the tree is a column and needs no affordance at all. */
+.tree-toggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.55rem 0;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.tree-toggle::after {
+  content: "+";
+  font-size: 1.1rem;
+  font-weight: 400;
+  line-height: 1;
+}
+.sidebar.open .tree-toggle::after {
+  content: "−";
+}
+.tree-toggle:hover {
+  color: var(--text);
+}
+
 /* ── narrow screens ────────────────────────────────────────────────────── */
 
 @media (max-width: 1180px) {
@@ -543,14 +574,25 @@ a:hover {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
-  /* The tree becomes a block above the page rather than vanishing: on a
-     documentation site it is the table of contents, and hiding it behind a
-     button on the one screen size where readers scroll most is a poor trade. */
+  /* The tree stays reachable but stops standing between the reader and the
+     text. Left expanded it is a full screen of navigation above every article,
+     which on a phone means scrolling past the whole table of contents to reach
+     the first paragraph of each page in turn. */
   .sidebar {
     position: static;
     max-height: none;
-    padding: 1rem 0 0;
+    padding: 0.75rem 0 0;
     border-bottom: 1px solid var(--border);
+  }
+  .sidebar .tree {
+    display: none;
+    padding-bottom: 0.75rem;
+  }
+  .sidebar.open .tree {
+    display: block;
+  }
+  .tree-toggle {
+    display: flex;
   }
   .search {
     flex: 1;
