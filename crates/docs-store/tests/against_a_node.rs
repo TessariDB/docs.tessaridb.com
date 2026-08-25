@@ -22,15 +22,31 @@
 use docs_content::parse;
 use docs_store::{Store, access_path, ingest::Corpus, ingest::Section};
 
+/// These tests take the node one at a time.
+///
+/// Not a workaround for a defect. Each test applies the schema and rebuilds the
+/// whole site, and both are things that happen **once, as a process starts** —
+/// so ten of them at once is a load this code will never meet in production, and
+/// the store is right to refuse it: `DEFINE NAMESPACE` writes a catalog record,
+/// and a rebuild rewrites four tables, so concurrent copies conflict on commit
+/// exactly as the store's isolation promises they will. Serialising here models
+/// what actually happens rather than papering over what does not.
+///
+/// Isolation between tests is the per-test namespace, not this lock.
+static NODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// The node to test against, and a distinct namespace per test so that two of
 /// them cannot see each other's records.
-async fn store(namespace: &str) -> Option<Store> {
+///
+/// The returned guard is held for the test's lifetime — bind it, do not drop it.
+async fn store(namespace: &str) -> Option<(Store, tokio::sync::MutexGuard<'static, ()>)> {
     let address = std::env::var("DOCS_TEST_NODE").ok()?;
+    let alone = NODE.lock().await;
     let mut store = Store::connect(&address, namespace, None)
         .await
         .expect("connect to the node named by DOCS_TEST_NODE");
     store.migrate().await.expect("the schema applies");
-    Some(store)
+    Some((store, alone))
 }
 
 fn corpus() -> Corpus {
@@ -67,7 +83,7 @@ fn corpus() -> Corpus {
 
 #[tokio::test]
 async fn the_schema_applies_twice_because_a_restart_is_not_a_special_case() {
-    let Some(mut store) = store("t_schema").await else {
+    let Some((mut store, _alone)) = store("t_schema").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -78,7 +94,7 @@ async fn the_schema_applies_twice_because_a_restart_is_not_a_special_case() {
 
 #[tokio::test]
 async fn a_page_written_comes_back_as_it_went_in() {
-    let Some(mut store) = store("t_page").await else {
+    let Some((mut store, _alone)) = store("t_page").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -103,7 +119,7 @@ async fn a_page_written_comes_back_as_it_went_in() {
 
 #[tokio::test]
 async fn a_slug_that_names_no_page_is_a_missing_page_and_not_a_fault() {
-    let Some(mut store) = store("t_missing").await else {
+    let Some((mut store, _alone)) = store("t_missing").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -120,7 +136,7 @@ async fn a_slug_that_names_no_page_is_a_missing_page_and_not_a_fault() {
 
 #[tokio::test]
 async fn the_ingest_is_idempotent_so_a_redeploy_does_not_double_the_site() {
-    let Some(mut store) = store("t_idempotent").await else {
+    let Some((mut store, _alone)) = store("t_idempotent").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -135,7 +151,7 @@ async fn the_ingest_is_idempotent_so_a_redeploy_does_not_double_the_site() {
 
 #[tokio::test]
 async fn the_tree_comes_back_through_the_graph_with_its_levels_intact() {
-    let Some(mut store) = store("t_tree").await else {
+    let Some((mut store, _alone)) = store("t_tree").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -172,7 +188,7 @@ async fn the_tree_comes_back_through_the_graph_with_its_levels_intact() {
 
 #[tokio::test]
 async fn a_search_returns_the_passage_and_not_the_top_of_the_page() {
-    let Some(mut store) = store("t_search").await else {
+    let Some((mut store, _alone)) = store("t_search").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -195,7 +211,7 @@ async fn a_search_returns_the_passage_and_not_the_top_of_the_page() {
 
 #[tokio::test]
 async fn the_page_a_query_is_about_outranks_a_page_that_merely_mentions_it() {
-    let Some(mut store) = store("t_rank").await else {
+    let Some((mut store, _alone)) = store("t_rank").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -211,7 +227,7 @@ async fn the_page_a_query_is_about_outranks_a_page_that_merely_mentions_it() {
 
 #[tokio::test]
 async fn a_search_term_cannot_become_syntax() {
-    let Some(mut store) = store("t_injection").await else {
+    let Some((mut store, _alone)) = store("t_injection").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -238,7 +254,7 @@ async fn a_search_term_cannot_become_syntax() {
 
 #[tokio::test]
 async fn an_empty_query_asks_the_node_nothing() {
-    let Some(mut store) = store("t_empty").await else {
+    let Some((mut store, _alone)) = store("t_empty").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -247,7 +263,7 @@ async fn an_empty_query_asks_the_node_nothing() {
 
 #[tokio::test]
 async fn the_search_runs_off_the_index_and_not_off_a_scan() {
-    let Some(mut store) = store("t_path").await else {
+    let Some((mut store, _alone)) = store("t_path").await else {
         eprintln!("skipped: DOCS_TEST_NODE is not set");
         return;
     };
@@ -258,7 +274,7 @@ async fn the_search_runs_off_the_index_and_not_off_a_scan() {
     // it took, which is the only thing that would.
     let answers = store
         .run_with(
-            "SELECT *, search::score(text, $q) AS relevance FROM fragment WHERE text MATCHES $q ORDER BY relevance DESC LIMIT 10;",
+            "SELECT page, heading, anchor, text, search::score(text, $q) AS relevance FROM fragment WHERE text MATCHES $q ORDER BY search::score(text, $q) DESC LIMIT 10;",
             vec![(
                 "q".to_owned(),
                 tessaridb_client::Value::String("analyzer".to_owned()),
@@ -268,4 +284,119 @@ async fn the_search_runs_off_the_index_and_not_off_a_scan() {
         .expect("a search");
     let path = access_path(answers.first()).expect("a record answer names its path");
     assert_ne!(path, "scan", "the search index is not being used");
+}
+
+#[tokio::test]
+async fn a_page_moved_to_another_section_leaves_the_first_one() {
+    let Some((mut store, _alone)) = store("t_move").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+    store
+        .put_section(&Section {
+            slug: "guides".to_owned(),
+            title: "Guides".to_owned(),
+            parent: None,
+            order: 20,
+            icon: None,
+        })
+        .await
+        .expect("a second root section");
+
+    let moved = parse(
+        "query-language/graphs",
+        "+++\ntitle = \"Graphs\"\nsection = \"guides\"\norder = 5\n+++\n\nEdges are records too.\n",
+    )
+    .expect("a page");
+    store.put_page(&moved).await.expect("the move");
+
+    let tree = store.tree().await.expect("the tree");
+    let under = |slug: &str| -> Vec<String> {
+        tree.iter()
+            .find(|node| node.slug == slug)
+            .map(|node| {
+                node.children
+                    .iter()
+                    .filter(|child| child.kind == "page")
+                    .map(|child| child.slug.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(under("guides"), vec!["query-language/graphs"]);
+    assert!(
+        !under("query-language").contains(&"query-language/graphs".to_owned()),
+        "the page is under both parents: {tree:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_edited_page_does_not_keep_the_tail_of_the_old_one() {
+    let Some((mut store, _alone)) = store("t_edit").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+    // Fragments are keyed by position, so a shortened page would otherwise leave
+    // its old tail behind — findable, and pointing at a heading that is gone.
+    assert!(
+        !store
+            .search("Ranking", 10)
+            .await
+            .expect("a search")
+            .is_empty(),
+        "the section exists before the edit"
+    );
+
+    let shortened = parse(
+        "query-language/search",
+        "+++\ntitle = \"Full-text search\"\nsection = \"query-language\"\norder = 40\n+++\n\nTerms, not patterns.\n",
+    )
+    .expect("a page");
+    store.put_page(&shortened).await.expect("the edit");
+
+    let hits = store.search("collection", 10).await.expect("a search");
+    assert!(
+        hits.is_empty(),
+        "a fragment of the old version survived the edit: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_deleted_page_leaves_the_tree_and_the_index_together() {
+    let Some((mut store, _alone)) = store("t_delete").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+    assert!(
+        store
+            .delete_page("query-language/search")
+            .await
+            .expect("a delete"),
+        "it was there, so the answer is that it was removed"
+    );
+    assert!(
+        store
+            .article("query-language/search")
+            .await
+            .expect("a read")
+            .is_none()
+    );
+    assert!(
+        store
+            .search("analyzer", 10)
+            .await
+            .expect("a search")
+            .is_empty(),
+        "a deleted page is still findable"
+    );
+    assert!(
+        !store
+            .delete_page("query-language/search")
+            .await
+            .expect("a second delete"),
+        "deleting what is not there should say so, not report success"
+    );
 }

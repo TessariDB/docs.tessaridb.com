@@ -11,10 +11,14 @@
 //!
 //! It runs at start, before the server takes traffic, so the window where the
 //! store is half-written is a window with no readers in it.
+//!
+//! An editor changing one page does **not** come through here — see `write`.
+//! Both write the same records through the same two helpers below; what differs
+//! is the unit.
 
 use docs_content::Page;
 
-use crate::{Fault, Store, schema::is_safe_slug};
+use crate::{Fault, Store, boolean, integer, optional, schema::is_safe_slug, text};
 
 /// A node of the left-hand tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +44,19 @@ pub struct Corpus {
     pub pages: Vec<Page>,
 }
 
+/// What an ingest wrote, so a caller can report it rather than assume it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Written {
+    /// Sections written.
+    pub sections: u64,
+    /// Pages written.
+    pub pages: u64,
+    /// Fragments written.
+    pub fragments: u64,
+    /// Tree edges written.
+    pub edges: u64,
+}
+
 impl Store {
     /// Replaces the store's contents with `corpus`.
     ///
@@ -58,33 +75,19 @@ impl Store {
             check(&page.slug)?;
         }
 
-        self.run("DELETE FROM contains;\nDELETE FROM fragment;\nDELETE FROM page;\nDELETE FROM section;\n")
-            .await?;
+        // `WHERE true` rather than a bare `DELETE FROM t`: the language reads a
+        // delete with no condition as naming one record by identity and refuses
+        // it, deliberately, so that a mistyped `DELETE FROM page` cannot empty a
+        // table. Emptying one is therefore always asked for out loud.
+        self.run(
+            "DELETE FROM holds WHERE true;\nDELETE FROM fragment WHERE true;\nDELETE FROM page WHERE true;\nDELETE FROM section WHERE true;\n",
+        )
+        .await?;
 
         let mut written = Written::default();
 
         for section in &corpus.sections {
-            let script = format!(
-                "CREATE section:'{slug}' = {{ slug: $slug, title: $title, order: $order, icon: $icon, root: $root }};",
-                slug = section.slug
-            );
-            self.run_with(
-                &script,
-                vec![
-                    ("slug".to_owned(), text(&section.slug)),
-                    ("title".to_owned(), text(&section.title)),
-                    ("order".to_owned(), integer(section.order)),
-                    ("icon".to_owned(), optional(section.icon.as_deref())),
-                    // Written rather than derived, so the tree read can find the
-                    // roots in one statement instead of asking every section
-                    // whether anything points at it.
-                    (
-                        "root".to_owned(),
-                        tessaridb_client::Value::Bool(section.parent.is_none()),
-                    ),
-                ],
-            )
-            .await?;
+            self.write_section(section).await?;
             written.sections = written.sections.saturating_add(1);
         }
 
@@ -92,71 +95,17 @@ impl Store {
         // that is not there yet is a dangling one and the tree read would skip it.
         for section in &corpus.sections {
             if let Some(parent) = &section.parent {
-                let script = format!(
-                    "RELATE section:'{parent}'->contains->section:'{child}';",
-                    child = section.slug
-                );
-                self.run(&script).await?;
+                self.relate(parent, "section", &section.slug).await?;
                 written.edges = written.edges.saturating_add(1);
             }
         }
 
         for page in &corpus.pages {
-            let script = format!(
-                "CREATE page:'{slug}' = {{ slug: $slug, title: $title, summary: $summary, markdown: $markdown, order: $order, unreleased: $unreleased }};",
-                slug = page.slug
-            );
-            self.run_with(
-                &script,
-                vec![
-                    ("slug".to_owned(), text(&page.slug)),
-                    ("title".to_owned(), text(&page.title)),
-                    (
-                        "summary".to_owned(),
-                        optional(page.front.summary.as_deref()),
-                    ),
-                    ("markdown".to_owned(), text(&page.markdown)),
-                    ("order".to_owned(), integer(page.front.order)),
-                    (
-                        "unreleased".to_owned(),
-                        tessaridb_client::Value::Bool(page.front.unreleased),
-                    ),
-                ],
-            )
-            .await?;
+            let fragments = self.write_page(page).await?;
             written.pages = written.pages.saturating_add(1);
-
-            if let Some(section) = &page.front.section {
-                check(section)?;
-                let script = format!(
-                    "RELATE section:'{section}'->contains->page:'{slug}';",
-                    slug = page.slug
-                );
-                self.run(&script).await?;
+            written.fragments = written.fragments.saturating_add(fragments);
+            if page.front.section.is_some() {
                 written.edges = written.edges.saturating_add(1);
-            }
-
-            for fragment in &page.fragments {
-                // The id is the page slug and the position, so it is stable
-                // across a rebuild and unique without a counter.
-                let script = format!(
-                    "CREATE fragment:'{slug}#{order}' = {{ page: $page, anchor: $anchor, heading: $heading, depth: $depth, order: $order, text: $text }};",
-                    slug = page.slug,
-                    order = fragment.order
-                );
-                self.run_with(
-                    &script,
-                    vec![
-                        ("page".to_owned(), text(&page.slug)),
-                        ("anchor".to_owned(), text(&fragment.anchor)),
-                        ("heading".to_owned(), text(&fragment.heading)),
-                        ("depth".to_owned(), integer(i64::from(fragment.depth))),
-                        ("order".to_owned(), integer(fragment.order)),
-                        ("text".to_owned(), text(&fragment.text)),
-                    ],
-                )
-                .await?;
-                written.fragments = written.fragments.saturating_add(1);
             }
         }
 
@@ -169,43 +118,113 @@ impl Store {
         );
         Ok(written)
     }
+
+    /// One section, replacing whatever stood at its slug.
+    pub(crate) async fn write_section(&mut self, section: &Section) -> Result<(), Fault> {
+        let script = format!(
+            "DELETE section:'{slug}';\nCREATE section:'{slug}' = {{ slug: $slug, title: $title, order: $order, icon: $icon, root: $root }};",
+            slug = section.slug
+        );
+        self.run_with(
+            &script,
+            vec![
+                ("slug".to_owned(), text(&section.slug)),
+                ("title".to_owned(), text(&section.title)),
+                ("order".to_owned(), integer(section.order)),
+                ("icon".to_owned(), optional(section.icon.as_deref())),
+                // Written rather than derived, so the tree read can find the
+                // roots in one statement instead of asking every section whether
+                // anything points at it.
+                ("root".to_owned(), boolean(section.parent.is_none())),
+            ],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// One page and its fragments, replacing whatever stood at its slug.
+    ///
+    /// Answers how many fragments it wrote.
+    pub(crate) async fn write_page(&mut self, page: &Page) -> Result<u64, Fault> {
+        let script = format!(
+            "DELETE page:'{slug}';\nCREATE page:'{slug}' = {{ slug: $slug, title: $title, summary: $summary, markdown: $markdown, order: $order, unreleased: $unreleased }};",
+            slug = page.slug
+        );
+        self.run_with(
+            &script,
+            vec![
+                ("slug".to_owned(), text(&page.slug)),
+                ("title".to_owned(), text(&page.title)),
+                (
+                    "summary".to_owned(),
+                    optional(page.front.summary.as_deref()),
+                ),
+                ("markdown".to_owned(), text(&page.markdown)),
+                ("order".to_owned(), integer(page.front.order)),
+                ("unreleased".to_owned(), boolean(page.front.unreleased)),
+            ],
+        )
+        .await?;
+
+        if let Some(section) = &page.front.section {
+            self.relate(section, "page", &page.slug).await?;
+        }
+
+        let mut written = 0_u64;
+        for fragment in &page.fragments {
+            // The id is the page slug and the position, so it is stable across a
+            // rebuild and unique without a counter.
+            let script = format!(
+                "CREATE fragment:'{slug}#{order}' = {{ page: $page, anchor: $anchor, heading: $heading, depth: $depth, order: $order, text: $text }};",
+                slug = page.slug,
+                order = fragment.order
+            );
+            self.run_with(
+                &script,
+                vec![
+                    ("page".to_owned(), text(&page.slug)),
+                    ("anchor".to_owned(), text(&fragment.anchor)),
+                    ("heading".to_owned(), text(&fragment.heading)),
+                    ("depth".to_owned(), integer(i64::from(fragment.depth))),
+                    ("order".to_owned(), integer(fragment.order)),
+                    ("text".to_owned(), text(&fragment.text)),
+                ],
+            )
+            .await?;
+            written = written.saturating_add(1);
+        }
+        Ok(written)
+    }
+
+    /// A tree edge from a section to a section or a page.
+    ///
+    /// The edge carries the child it points at as **its own field**, which looks
+    /// redundant and is not. `RELATE` names the endpoints `in` and `out`, and
+    /// `IN` is an operator in this language, so an edge cannot be filtered by
+    /// its target — there is no way to write "the edge pointing at this page".
+    /// Without a field of our own, moving a page to another section would leave
+    /// the old edge in place and the page would appear under both parents.
+    /// See `write::unlink`.
+    pub(crate) async fn relate(
+        &mut self,
+        parent: &str,
+        table: &str,
+        child: &str,
+    ) -> Result<(), Fault> {
+        self.run_with(
+            &format!("RELATE section:'{parent}'->holds->{table}:'{child}' = {{ child: $child }};"),
+            vec![("child".to_owned(), text(&format!("{table}:{child}")))],
+        )
+        .await?;
+        Ok(())
+    }
 }
 
-/// What an ingest wrote, so a caller can report it rather than assume it.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Written {
-    /// Sections written.
-    pub sections: u64,
-    /// Pages written.
-    pub pages: u64,
-    /// Fragments written.
-    pub fragments: u64,
-    /// Tree edges written.
-    pub edges: u64,
-}
-
-fn check(slug: &str) -> Result<(), Fault> {
+pub(crate) fn check(slug: &str) -> Result<(), Fault> {
     if is_safe_slug(slug) {
         Ok(())
     } else {
         Err(Fault::UnsafeSlug(slug.to_owned()))
-    }
-}
-
-fn text(value: &str) -> tessaridb_client::Value {
-    tessaridb_client::Value::String(value.to_owned())
-}
-
-fn integer(value: i64) -> tessaridb_client::Value {
-    tessaridb_client::Value::Number(tessaridb_client::Number::Integer(value))
-}
-
-/// An absent optional is `Null` and not the empty string, because the store
-/// distinguishes them and a reader of the data should be able to as well.
-fn optional(value: Option<&str>) -> tessaridb_client::Value {
-    match value {
-        Some(found) => text(found),
-        None => tessaridb_client::Value::Null,
     }
 }
 

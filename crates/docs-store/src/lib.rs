@@ -12,6 +12,7 @@
 pub mod ingest;
 pub mod read;
 pub mod schema;
+pub mod write;
 
 use tessaridb_client::{Answer, Client, Value};
 
@@ -38,6 +39,24 @@ pub enum Fault {
         /// What arrived.
         found: &'static str,
     },
+}
+
+impl Fault {
+    /// The store's own words when it **refused**, or `None` when the failure was
+    /// the transport.
+    ///
+    /// The distinction is the one a caller acts on and the one most easily
+    /// flattened: a refusal is about this caller and this statement, and a
+    /// transport failure is about the network. Answering both the same way sends
+    /// somebody to the wrong place. Exposed here so callers need not depend on
+    /// the client crate to tell them apart.
+    #[must_use]
+    pub fn refusal(&self) -> Option<&str> {
+        match self {
+            Self::Client(tessaridb_client::Error::Refused { message }) => Some(message),
+            _ => None,
+        }
+    }
 }
 
 /// A connection to the store, already pointed at one version's namespace.
@@ -161,6 +180,30 @@ pub fn access_path(answer: Option<&Answer>) -> Option<&str> {
     match answer {
         Some(Answer::Records { path, .. }) => Some(path.as_str()),
         _ => None,
+    }
+}
+
+/// A bound string value.
+pub(crate) fn text(value: &str) -> Value {
+    Value::String(value.to_owned())
+}
+
+/// A bound integer value.
+pub(crate) fn integer(value: i64) -> Value {
+    Value::Number(tessaridb_client::Number::Integer(value))
+}
+
+/// A bound boolean value.
+pub(crate) fn boolean(value: bool) -> Value {
+    Value::Bool(value)
+}
+
+/// An absent optional binds as `Null` and not as the empty string, because the
+/// store distinguishes them and a reader of the data should be able to as well.
+pub(crate) fn optional(value: Option<&str>) -> Value {
+    match value {
+        Some(found) => text(found),
+        None => Value::Null,
     }
 }
 

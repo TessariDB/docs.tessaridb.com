@@ -52,7 +52,7 @@ pub struct Hit {
 impl Store {
     /// The whole left-hand tree.
     ///
-    /// Read as a graph walk from the roots down, which is what the `contains`
+    /// Read as a graph walk from the roots down, which is what the `holds`
     /// edge is for: the depth of the tree lives in the data rather than in a
     /// fixed set of columns, so a fourth level is content and not a migration.
     ///
@@ -98,7 +98,7 @@ impl Store {
 
         let answers = self
             .run(&format!(
-                "SELECT * FROM section:'{slug}'->contains->section ORDER BY order;\nSELECT * FROM section:'{slug}'->contains->page ORDER BY order;"
+                "SELECT * FROM section:'{slug}'->holds->section ORDER BY order;\nSELECT * FROM section:'{slug}'->holds->page ORDER BY order;"
             ))
             .await?;
 
@@ -174,11 +174,16 @@ impl Store {
             return Ok(Vec::new());
         }
         let limit = limit.clamp(1, 50);
+        // The projection is a list rather than `*` because the language has no
+        // `SELECT *, expr` form — and it is the better statement regardless: a
+        // fragment's `markdown`-sized neighbours have no business travelling on
+        // a search result. `ORDER BY` repeats the call rather than naming the
+        // alias, so the ordering does not depend on where aliases resolve.
         let script = format!(
-            "SELECT *, search::score(text, $q) AS relevance
+            "SELECT page, heading, anchor, text, search::score(text, $q) AS relevance
              FROM fragment
              WHERE text MATCHES $q
-             ORDER BY relevance DESC
+             ORDER BY search::score(text, $q) DESC
              LIMIT {limit};"
         );
         let answers = self
