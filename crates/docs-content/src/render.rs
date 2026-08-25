@@ -60,8 +60,38 @@ pub fn to_html(markdown: &str) -> String {
     }
 
     let mut html = String::with_capacity(markdown.len().saturating_mul(3).saturating_div(2));
-    html::push_html(&mut html, events.into_iter());
+    html::push_html(&mut html, wrap_tables(events).into_iter());
     html
+}
+
+/// Puts every table inside the element the stylesheet scrolls.
+///
+/// `globals.css` gives `.table-scroll` `overflow-x: auto` and states in a
+/// comment that the page never scrolls sideways. Nothing wore the class, so
+/// that was a stylesheet describing an intention: a table wider than the
+/// measure moved the whole article, and `th { white-space: nowrap }` — which is
+/// there so a header does not wrap mid-phrase — makes wide the ordinary case
+/// for a reference table rather than the rare one.
+///
+/// Done here rather than in the front end because the front end receives HTML
+/// and would have to parse it back to find the tables, and because a page
+/// written through the API renders through this same function.
+fn wrap_tables<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
+    let mut out = Vec::with_capacity(events.len().saturating_add(4));
+    for event in events {
+        match event {
+            Event::Start(Tag::Table(_)) => {
+                out.push(Event::Html(r#"<div class="table-scroll">"#.into()));
+                out.push(event);
+            }
+            Event::End(TagEnd::Table) => {
+                out.push(event);
+                out.push(Event::Html("</div>\n".into()));
+            }
+            _ => out.push(event),
+        }
+    }
+    out
 }
 
 /// The text of the heading whose opening tag is at `from`.
@@ -156,6 +186,30 @@ Writes them.
         let html = to_html("| a | b |\n|---|---|\n| 1 | 2 |\n");
         assert!(html.contains("<table>"), "{html}");
         assert!(!html.contains("|---|"), "{html}");
+    }
+
+    #[test]
+    fn a_table_carries_the_wrapper_that_keeps_it_from_moving_the_page() {
+        // `globals.css` styles `.table-scroll` with `overflow-x: auto` and says
+        // in a comment that the page never scrolls sideways. Nothing emitted
+        // the class, so the promise was a stylesheet talking to itself: a
+        // reference table wider than the measure took the whole article with
+        // it, and `th { white-space: nowrap }` makes that the normal case
+        // rather than the rare one.
+        let html = to_html("| a | b |\n|---|---|\n| 1 | 2 |\n");
+        assert!(html.contains("<div class=\"table-scroll\">"), "{html}");
+        assert!(html.ends_with("</div>\n") || html.contains("</table>\n</div>"), "{html}");
+        // One wrapper per table, not one for the document.
+        let two = to_html("| a |\n|---|\n| 1 |\n\ntext\n\n| b |\n|---|\n| 2 |\n");
+        assert_eq!(two.matches("class=\"table-scroll\"").count(), 2, "{two}");
+    }
+
+    #[test]
+    fn a_page_with_no_table_gains_nothing() {
+        // The pass runs over every page, so the case that matters most is the
+        // one where it must do nothing at all.
+        let html = to_html("Just a paragraph with a | pipe in it.\n");
+        assert!(!html.contains("table-scroll"), "{html}");
     }
 
     #[test]

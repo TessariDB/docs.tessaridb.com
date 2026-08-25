@@ -7,9 +7,10 @@
  * `linejoin: round`, on a 24 grid — geometric, open, and light enough to sit
  * beside 12px uppercase labels without shouting.
  *
- * Written out rather than taken from an icon package: there are eight of them,
- * a package would be a dependency and a licence for shapes that then look like
- * everybody else's, and the whole point of the set is that it looks like ours.
+ * Written out rather than taken from an icon package: there are fourteen of
+ * them, a package would be a dependency and a licence for shapes that then look
+ * like everybody else's, and the whole point of the set is that it looks like
+ * ours.
  */
 
 type Props = {
@@ -143,6 +144,74 @@ export function Moon(props: Props) {
   );
 }
 
+/** Getting started: the same frame as the prompt, with a run triangle in it. */
+export function Start(props: Props) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <path d="M10 8.2 L16 12 L10 15.8 Z" />
+    </Svg>
+  );
+}
+
+/** Keys and files: a box with a lid and a latch. */
+export function Box(props: Props) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="6" width="18" height="14" rx="3" />
+      <path d="M3 10.5 H21" />
+      <path d="M10.2 14.6 H13.8" />
+    </Svg>
+  );
+}
+
+/** Users and access. */
+export function Shield(props: Props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3 L19.5 6 V12 C19.5 16.3 16.4 19.5 12 21 C7.6 19.5 4.5 16.3 4.5 12 V6 Z" />
+    </Svg>
+  );
+}
+
+/**
+ * A running node: the frame, the node inside it, and the four ways in.
+ *
+ * Not the usual stack of rack units, because `Records` is already two stacked
+ * rounded rectangles and at 16px the two would be the same icon.
+ */
+export function Node(props: Props) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <circle cx="12" cy="12" r="2.7" />
+      <path d="M12 3 V6.3 M12 17.7 V21 M3 12 H6.3 M17.7 12 H21" />
+    </Svg>
+  );
+}
+
+/** Clients: a request out and an answer back. */
+export function Exchange(props: Props) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <path d="M7.4 9.6 H16.6 L13.9 6.9" />
+      <path d="M16.6 14.4 H7.4 L10.1 17.1" />
+    </Svg>
+  );
+}
+
+/** Reference: a bound volume, spine on the left. */
+export function Book(props: Props) {
+  return (
+    <Svg {...props}>
+      <rect x="4" y="3" width="16" height="18" rx="3" />
+      <path d="M8.2 3 V21" />
+      <path d="M11.6 8.4 H16.6 M11.6 12 H16.6" />
+    </Svg>
+  );
+}
+
 /** Something worth stopping for — used by the unreleased notice. */
 export function Alert(props: Props) {
   return (
@@ -171,6 +240,18 @@ export function named(icon: string | null): (props: Props) => React.ReactElement
       return Graph;
     case "search":
       return Search;
+    case "start":
+      return Start;
+    case "box":
+      return Box;
+    case "shield":
+      return Shield;
+    case "node":
+      return Node;
+    case "exchange":
+      return Exchange;
+    case "book":
+      return Book;
     default:
       return Records;
   }
