@@ -193,8 +193,12 @@ impl Store {
         // fragment's `markdown`-sized neighbours have no business travelling on
         // a search result. `ORDER BY` repeats the call rather than naming the
         // alias, so the ordering does not depend on where aliases resolve.
+        // `body` is projected and `text` is not: the match is made against
+        // `text`, which opens with the page title and the heading so that one
+        // index can rank both — and a snippet drawn from it would begin by
+        // repeating the two lines the result already shows above it.
         let script = format!(
-            "SELECT page, heading, anchor, text, search::score(text, $q) AS relevance
+            "SELECT page, heading, anchor, body, search::score(text, $q) AS relevance
              FROM fragment
              WHERE text MATCHES $q
              ORDER BY search::score(text, $q) DESC
@@ -216,7 +220,7 @@ impl Store {
                 page: text_of(value, "page"),
                 heading: text_of(value, "heading"),
                 anchor: text_of(value, "anchor"),
-                text: text_of(value, "text"),
+                text: text_of(value, "body"),
                 relevance: relevance_of(value),
             })
             .collect())

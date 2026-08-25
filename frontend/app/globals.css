@@ -1,0 +1,561 @@
+/*
+ * The palette is taken from the mark: #7F77DD, the violet the two squares are
+ * drawn in. Everything else is a neutral chosen to sit under it without
+ * competing — a documentation site is read for minutes at a time, so the accent
+ * appears on links, on the current page, and on a focus ring, and nowhere else.
+ *
+ * Both themes are defined here as tokens on `:root`. The theme is chosen by a
+ * `data-theme` attribute on `<html>`, set before first paint by the script in
+ * `layout.tsx` — see there for why it cannot be done in React.
+ */
+
+:root {
+  --brand: #6b5fd1;
+  --brand-bright: #7f77dd;
+  --brand-soft: rgba(127, 119, 221, 0.12);
+
+  --bg: #ffffff;
+  --bg-raised: #fafafc;
+  --bg-sunken: #f4f4f8;
+  --border: #e4e4ee;
+  --border-strong: #d2d2e0;
+
+  --text: #1a1a22;
+  --text-muted: #5e5e6d;
+  --text-faint: #8a8a99;
+
+  --code-bg: #f6f6fa;
+  --code-text: #2a2a38;
+
+  --shadow: 0 1px 2px rgba(20, 20, 40, 0.06), 0 8px 24px rgba(20, 20, 40, 0.08);
+
+  --sidebar: 17rem;
+  --outline: 15rem;
+  --measure: 46rem;
+  --radius: 8px;
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+:root[data-theme="dark"] {
+  --brand: #9a93e8;
+  --brand-bright: #7f77dd;
+  --brand-soft: rgba(127, 119, 221, 0.18);
+
+  --bg: #0d0d13;
+  --bg-raised: #14141d;
+  --bg-sunken: #101018;
+  --border: #262633;
+  --border-strong: #34344a;
+
+  --text: #e9e9f2;
+  --text-muted: #a0a0b4;
+  --text-faint: #6f6f85;
+
+  --code-bg: #14141f;
+  --code-text: #d5d5e6;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  /* Headings are linked to from search results and from the outline; without
+     this an anchor lands the heading flush against the sticky header. */
+  scroll-padding-top: 5rem;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15.5px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-bright);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ── the frame ─────────────────────────────────────────────────────────── */
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 3.75rem;
+  padding: 0 1.25rem;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+  font-weight: 620;
+  letter-spacing: -0.015em;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+.brand:hover {
+  text-decoration: none;
+}
+.brand small {
+  font-weight: 500;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  letter-spacing: 0;
+}
+
+.header-spacer {
+  flex: 1;
+}
+
+/*
+ * Two grids, not one. The tree is a sibling of the page area, and the outline
+ * is a sibling of the article *inside* it — because the outline belongs to the
+ * page and only the page component knows what is in it. One flat three-column
+ * grid would need the layout to fetch the page as well, which is the same read
+ * twice.
+ */
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  align-items: start;
+  gap: 2.5rem;
+  max-width: 90rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+/* ── the tree ──────────────────────────────────────────────────────────── */
+
+.sidebar {
+  position: sticky;
+  top: 3.75rem;
+  max-height: calc(100vh - 3.75rem);
+  overflow-y: auto;
+  padding: 1.5rem 0 4rem;
+  font-size: 0.875rem;
+}
+
+.tree,
+.tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-section > .tree-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.35rem 0 0.4rem;
+  color: var(--text);
+  font-size: 0.7rem;
+  font-weight: 660;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.tree-section > .tree-label svg {
+  color: var(--brand);
+}
+
+/* A subsection is a heading inside a group: smaller, not shouted. */
+.tree-sub > .tree-label {
+  margin: 0.9rem 0 0.3rem;
+  padding-left: 0.7rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tree a {
+  display: block;
+  padding: 0.24rem 0.6rem;
+  margin-left: -0.1rem;
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.tree a:hover {
+  color: var(--text);
+  background: var(--bg-sunken);
+  text-decoration: none;
+}
+.tree a[aria-current="page"] {
+  color: var(--brand);
+  border-left-color: var(--brand-bright);
+  background: var(--brand-soft);
+  font-weight: 550;
+}
+.tree ul ul a {
+  padding-left: 1.3rem;
+}
+
+/* ── the page ──────────────────────────────────────────────────────────── */
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--outline);
+  align-items: start;
+  gap: 2.5rem;
+  min-width: 0;
+  padding: 2.5rem 0 6rem;
+}
+
+.article {
+  min-width: 0;
+  max-width: var(--measure);
+}
+
+.article h1 {
+  margin: 0 0 0.4rem;
+  font-size: 2.1rem;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  font-weight: 680;
+}
+
+.summary {
+  margin: 0 0 2rem;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.prose h2,
+.prose h3,
+.prose h4 {
+  scroll-margin-top: 5rem;
+  letter-spacing: -0.015em;
+  font-weight: 640;
+}
+.prose h2 {
+  margin: 2.75rem 0 0.85rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 1.4rem;
+}
+.prose h3 {
+  margin: 2rem 0 0.6rem;
+  font-size: 1.13rem;
+}
+.prose h4 {
+  margin: 1.6rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.prose p {
+  margin: 0 0 1.1rem;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0 0 1.1rem;
+  padding-left: 1.35rem;
+}
+.prose li {
+  margin: 0.3rem 0;
+}
+
+.prose blockquote {
+  margin: 1.3rem 0;
+  padding: 0.1rem 1.1rem;
+  border-left: 3px solid var(--brand-bright);
+  background: var(--brand-soft);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--text-muted);
+}
+
+.prose code {
+  font-family: var(--mono);
+  font-size: 0.865em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1em 0.36em;
+  color: var(--code-text);
+}
+
+.prose pre {
+  margin: 1.3rem 0;
+  padding: 0.95rem 1.1rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  line-height: 1.55;
+}
+.prose pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+/* Wide content scrolls inside itself; the page never scrolls sideways. */
+.prose .table-scroll {
+  overflow-x: auto;
+  margin: 1.3rem 0;
+}
+.prose table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+.prose th,
+.prose td {
+  text-align: left;
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.prose th {
+  font-weight: 620;
+  color: var(--text);
+  border-bottom-color: var(--border-strong);
+  white-space: nowrap;
+}
+.prose td {
+  color: var(--text-muted);
+}
+
+.notice {
+  display: flex;
+  gap: 0.7rem;
+  margin: 0 0 2rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.notice svg {
+  flex: none;
+  margin-top: 0.15rem;
+  color: var(--brand);
+}
+.notice strong {
+  color: var(--text);
+}
+
+/* ── the outline ───────────────────────────────────────────────────────── */
+
+.outline {
+  position: sticky;
+  top: 3.75rem;
+  max-height: calc(100vh - 3.75rem);
+  overflow-y: auto;
+  padding: 2.7rem 0 4rem;
+  font-size: 0.82rem;
+}
+.outline-title {
+  margin: 0 0 0.6rem;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 660;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.outline ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--border);
+}
+.outline a {
+  display: block;
+  padding: 0.2rem 0 0.2rem 0.8rem;
+  margin-left: -1px;
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
+}
+.outline a:hover {
+  color: var(--text);
+  border-left-color: var(--border-strong);
+  text-decoration: none;
+}
+.outline .depth-3 a {
+  padding-left: 1.6rem;
+}
+.outline .depth-4 a {
+  padding-left: 2.3rem;
+}
+
+/* ── search ────────────────────────────────────────────────────────────── */
+
+.search {
+  position: relative;
+  flex: 0 1 24rem;
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.7rem;
+  height: 2.25rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+}
+.search-field:focus-within {
+  border-color: var(--brand-bright);
+  background: var(--bg);
+}
+.search-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+}
+.search-field input::placeholder {
+  color: var(--text-faint);
+}
+.search-key {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  line-height: 1.4;
+}
+
+.results {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  right: 0;
+  max-height: min(28rem, 70vh);
+  overflow-y: auto;
+  padding: 0.35rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+.results-empty {
+  padding: 0.9rem;
+  color: var(--text-faint);
+  font-size: 0.85rem;
+}
+.result {
+  display: block;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  color: var(--text);
+}
+.result:hover,
+.result[data-active="true"] {
+  background: var(--brand-soft);
+  text-decoration: none;
+}
+.result-heading {
+  font-size: 0.875rem;
+  font-weight: 560;
+}
+.result-where {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+.result-text {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── controls ──────────────────────────────────────────────────────────── */
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.icon-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* ── narrow screens ────────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .outline {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  /* The tree becomes a block above the page rather than vanishing: on a
+     documentation site it is the table of contents, and hiding it behind a
+     button on the one screen size where readers scroll most is a poor trade. */
+  .sidebar {
+    position: static;
+    max-height: none;
+    padding: 1rem 0 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .search {
+    flex: 1;
+  }
+  .brand small {
+    display: none;
+  }
+}

@@ -133,26 +133,44 @@ async fn serve(asked: &Asked) -> Result<(), String> {
     };
 
     let mut store = open(asked).await?;
+
+    // The schema is applied first, and whether it *can* be applied is the
+    // question that decides everything after it.
+    //
+    // First, because on a brand-new store the namespace does not exist yet, and
+    // asking an absent namespace how many pages it holds is a refusal rather
+    // than the answer "none". Allowed to fail, because the account a deployed
+    // site reads with is a viewer and a viewer may not `DEFINE` anything — so
+    // the refusal is the signal, not a fault: a process that cannot define the
+    // schema is not the process that set this store up, and its job is to read
+    // what is there rather than to build it.
+    let prepared = match store.migrate().await {
+        Ok(()) => true,
+        Err(fault) if fault.refusal().is_some() => {
+            log::info!(
+                "not applying the schema: {}. This is the ordinary case for a \
+                 deployed site, which reads as a viewer.",
+                fault.refusal().unwrap_or("refused")
+            );
+            false
+        }
+        Err(fault) => return Err(format!("the schema would not apply: {fault}")),
+    };
+
     let held = store
         .pages_held()
         .await
         .map_err(|fault| format!("could not ask the store what it holds: {fault}"))?;
 
-    // The schema is applied only where the store is about to be written, and
-    // not on every start. Applying it is an administrative act — `DEFINE` — and
-    // a process whose job is answering public reads should not be holding an
-    // account that can do it. On a populated store this branch does nothing and
-    // the whole of `serve` runs as a viewer, which is the point.
-    match (corpus, held) {
-        (Some(corpus), _) => {
+    match (corpus, held, prepared) {
+        (Some(corpus), _, _) => {
             log::warn!(
                 "--ingest: replacing the {held} pages in the store with {}",
                 asked.content.display()
             );
-            prepare(&mut store).await?;
             rebuild(&mut store, &corpus).await?;
         }
-        (None, 0) => {
+        (None, 0, true) => {
             // Seeded rather than rebuilt: an empty store has no edits to lose,
             // so this is the one moment where disk may speak for the store.
             log::info!(
@@ -160,10 +178,18 @@ async fn serve(asked: &Asked) -> Result<(), String> {
                 asked.content.display()
             );
             let corpus = corpus::read(&asked.content).map_err(|fault| fault.to_string())?;
-            prepare(&mut store).await?;
             rebuild(&mut store, &corpus).await?;
         }
-        (None, held) => {
+        (None, 0, false) => {
+            // Served rather than refused. An empty site is a poor page; a front
+            // end that cannot start at all is a worse one, and the reason it is
+            // empty is right here in the log.
+            log::warn!(
+                "the store holds no pages and this process may not write — run \
+                 `docs ingest` with an account that can"
+            );
+        }
+        (None, held, _) => {
             log::info!(
                 "the store holds {held} pages and is the source; {} was not read",
                 asked.content.display()
@@ -200,14 +226,6 @@ async fn serve(asked: &Asked) -> Result<(), String> {
         .with_graceful_shutdown(stopped())
         .await
         .map_err(|fault| format!("the server stopped: {fault}"))
-}
-
-/// Applies the schema. Needed only where the store is about to be written.
-async fn prepare(store: &mut Store) -> Result<(), String> {
-    store
-        .migrate()
-        .await
-        .map_err(|fault| format!("the schema would not apply: {fault}"))
 }
 
 /// Replaces the store's contents, and says what it wrote.

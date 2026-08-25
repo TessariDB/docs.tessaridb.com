@@ -87,10 +87,47 @@ async fn nav(State(site): State<Site>) -> Response {
     }
 }
 
+/// A page as the front end receives it: rendered, with its outline.
+///
+/// The HTML and the outline are produced **here**, from one Markdown body,
+/// through the code that also assigns search anchors — so a search result, an
+/// outline entry and an id on the page are the same string by construction. A
+/// front end that rendered the Markdown itself would have to reproduce the
+/// anchor rule, and the day it differed every result would land at the top of
+/// the page with nothing reporting a fault.
+#[derive(Debug, serde::Serialize)]
+pub struct Rendered {
+    /// The path this page answers.
+    pub slug: String,
+    /// The title.
+    pub title: String,
+    /// One sentence under the title.
+    pub summary: Option<String>,
+    /// The body, as HTML.
+    pub html: String,
+    /// The right-hand outline.
+    pub outline: Vec<docs_content::Heading>,
+    /// Whether the page describes something the engine does not do yet.
+    pub unreleased: bool,
+}
+
 async fn page(State(site): State<Site>, Path(slug): Path<String>) -> Response {
     match site.reader().await {
         Ok(mut store) => match store.article(&slug).await {
-            Ok(Some(article)) => json(StatusCode::OK, &article),
+            Ok(Some(article)) => {
+                let (outline, _) = docs_content::fragment::split(&article.title, &article.markdown);
+                json(
+                    StatusCode::OK,
+                    &Rendered {
+                        slug: article.slug,
+                        title: article.title,
+                        summary: article.summary,
+                        html: docs_content::to_html(&article.markdown),
+                        outline,
+                        unreleased: article.unreleased,
+                    },
+                )
+            }
             Ok(None) => message(StatusCode::NOT_FOUND, "no such page"),
             Err(fault) => refused(&fault),
         },

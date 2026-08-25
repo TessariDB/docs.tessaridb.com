@@ -26,6 +26,7 @@
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 
 use crate::anchor::Anchors;
+use crate::render::options;
 
 /// One heading-delimited piece of a page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,10 +41,19 @@ pub struct Fragment {
     pub order: i64,
     /// What the store indexes: page title, heading and body, in that order.
     pub text: String,
+    /// The passage alone, for showing a reader.
+    ///
+    /// Separate from `text` because the two have different jobs. `text` carries
+    /// the page title and the heading so that one index can rank a title hit
+    /// against a body hit — and a snippet built from it therefore opens by
+    /// repeating the title and the heading the result already displays above it,
+    /// which reads as a stutter and pushes the words the reader searched for off
+    /// the end of the line.
+    pub body: String,
 }
 
 /// An entry in the right-hand outline.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Heading {
     /// Depth, 1 to 6.
     pub depth: u8,
@@ -70,7 +80,9 @@ pub fn split(title: &str, markdown: &str) -> (Vec<Heading>, Vec<Fragment>) {
     let mut in_heading = false;
     let mut heading_text = String::new();
 
-    for event in Parser::new(markdown) {
+    // The same configuration the renderer uses, so that what is indexed and what
+    // is displayed are one document read one way.
+    for event in Parser::new_ext(markdown, options()) {
         match event {
             Event::Start(Tag::Heading { level, .. }) => {
                 in_heading = true;
@@ -174,6 +186,7 @@ fn finish(open: Open, title: &str, into: &mut Vec<Fragment>) {
         depth: open.depth,
         order: 0,
         text,
+        body: body.to_owned(),
     });
 }
 
@@ -293,6 +306,24 @@ mod tests {
         let (_, fragments) = split("Page", "## H\n\nan analyzer\nbelongs to the field\n");
         let text = &fragments.first().expect("one").text;
         assert!(text.contains("analyzer belongs"), "{text}");
+    }
+
+    #[test]
+    fn the_shown_body_carries_no_title_and_no_heading() {
+        // What a search result displays under its own heading line. Drawing it
+        // from `text` instead would open every snippet by repeating the page
+        // title and the heading printed directly above it.
+        let (_, fragments) = split("Full-text search", PAGE);
+        let ranking = fragments
+            .iter()
+            .find(|fragment| fragment.heading == "Ranking")
+            .expect("a Ranking fragment");
+        assert_eq!(ranking.body, "A score measures one against the collection.");
+        assert!(
+            ranking.text.starts_with("Full-text search Ranking"),
+            "the indexed text still carries both: {}",
+            ranking.text
+        );
     }
 
     #[test]

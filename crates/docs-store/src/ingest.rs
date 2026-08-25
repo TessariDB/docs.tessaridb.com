@@ -175,7 +175,7 @@ impl Store {
             // The id is the page slug and the position, so it is stable across a
             // rebuild and unique without a counter.
             let script = format!(
-                "CREATE fragment:'{slug}#{order}' = {{ page: $page, anchor: $anchor, heading: $heading, depth: $depth, order: $order, text: $text }};",
+                "CREATE fragment:'{slug}#{order}' = {{ page: $page, anchor: $anchor, heading: $heading, depth: $depth, order: $order, text: $text, body: $body }};",
                 slug = page.slug,
                 order = fragment.order
             );
@@ -188,6 +188,10 @@ impl Store {
                     ("depth".to_owned(), integer(i64::from(fragment.depth))),
                     ("order".to_owned(), integer(fragment.order)),
                     ("text".to_owned(), text(&fragment.text)),
+                    // Stored and not analyzed: this one is for showing, and a
+                    // second analyzed field would be a second collection that
+                    // `search::score` could not honestly rank against the first.
+                    ("body".to_owned(), text(&fragment.body)),
                 ],
             )
             .await?;

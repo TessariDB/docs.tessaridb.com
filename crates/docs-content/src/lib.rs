@@ -17,10 +17,12 @@
 pub mod anchor;
 pub mod fragment;
 pub mod front;
+pub mod render;
 
 pub use crate::anchor::slug;
 pub use crate::fragment::{Fragment, Heading};
 pub use crate::front::FrontMatter;
+pub use crate::render::to_html;
 
 /// What can be wrong with a source file.
 ///
