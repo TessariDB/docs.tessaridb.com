@@ -129,6 +129,20 @@ impl Store {
         })
     }
 
+    /// How many pages the store is holding.
+    ///
+    /// Asked at start to decide whether the store needs seeding. A count rather
+    /// than a "has anything ever been ingested" marker, because a marker is a
+    /// second fact to keep true and this one is derived from the thing itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Fault::Client`] when the node refuses.
+    pub async fn pages_held(&mut self) -> Result<usize, Fault> {
+        let answers = self.run("SELECT slug FROM page;").await?;
+        Ok(records(answers.first())?.len())
+    }
+
     /// One page.
     ///
     /// # Errors

@@ -400,3 +400,32 @@ async fn a_deleted_page_leaves_the_tree_and_the_index_together() {
         "deleting what is not there should say so, not report success"
     );
 }
+
+#[tokio::test]
+async fn an_empty_store_and_a_populated_one_are_told_apart_by_counting_pages() {
+    // What `docs serve` decides on at start: an empty store may be seeded from
+    // disk, a populated one owns its content and is left alone. Getting this
+    // backwards silently reverts every edit made through the API on the next
+    // restart, which is a failure nobody would attribute to a count.
+    let Some((mut store, _alone)) = store("t_held").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    assert_eq!(
+        store.pages_held().await.expect("a count"),
+        0,
+        "a namespace nothing has been written to holds nothing"
+    );
+    store.ingest(&corpus()).await.expect("ingest");
+    assert_eq!(store.pages_held().await.expect("a count"), 2);
+
+    store
+        .delete_page("query-language/search")
+        .await
+        .expect("a delete");
+    assert_eq!(
+        store.pages_held().await.expect("a count"),
+        1,
+        "the count follows the store rather than a marker set at ingest"
+    );
+}
