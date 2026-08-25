@@ -55,7 +55,11 @@ services:
       # The service name, not localhost: this resolves on the compose network.
       DOCS_API: http://api:8080
     ports:
-      - "${DOCS_WEB_PORT:-3000}:3000"
+      # Loopback by default. The public edge is a TLS terminator on the host,
+      # which is what holds the certificate and what 80 and 443 reach; binding
+      # this to every interface would publish an HTTP origin beside it that
+      # answers on the same name without one, and nothing would report that.
+      - "${DOCS_WEB_BIND:-127.0.0.1:3000}:3000"
     depends_on:
       api:
         # Waits for the API's health check, which itself only passes once the
