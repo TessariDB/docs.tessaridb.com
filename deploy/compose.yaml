@@ -19,6 +19,11 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.api
+      # The engine and the client SDK are private repositories, so the build
+      # authenticates with the forwarded agent rather than with a token baked
+      # into a layer. Requires an agent holding a key GitHub accepts.
+      ssh:
+        - default
       args:
         # Which revision of the engine this image runs. Pinned here rather than
         # floating, so that rebuilding an old image gives the old engine.

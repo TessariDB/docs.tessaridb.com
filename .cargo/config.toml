@@ -1,10 +1,10 @@
 # Fetch git dependencies with the git CLI rather than with cargo's bundled
 # libgit2.
 #
-# The client is a public repository and `git ls-remote` over HTTPS needs no
-# credentials, but libgit2 asks a credential helper anyway and fails when none
-# answers. The git CLI is already on every machine that builds this, including
-# the API image, so this costs nothing and removes a class of build failure that
-# reads as "the revision does not exist" when the revision is there.
+# The client is a private repository, so the fetch is authenticated, and
+# libgit2's credential handling fails where the git CLI — which already honours
+# the machine's own SSH agent, credential helper and `insteadOf` rewrites —
+# succeeds. Without this the failure reads as "the revision does not exist"
+# when the revision is there, which is the wrong thing to go looking for.
 [net]
 git-fetch-with-cli = true

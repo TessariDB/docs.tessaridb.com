@@ -14,17 +14,27 @@
 FROM rust:1.98-slim-bookworm AS build
 
 # `git` because the client SDK is a git dependency and cargo is told to fetch
-# with the CLI (see .cargo/config.toml — libgit2 fails auth against the public
-# repository where the git binary succeeds).
+# with the CLI (see .cargo/config.toml); `openssh-client` because that
+# repository is private and the fetch is authenticated.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
  && rm -rf /var/lib/apt/lists/*
+
+# The lockfile pins the dependency by its HTTPS URL, and rewriting that URL in
+# `Cargo.toml` would change what `--locked` is checking against. So the URL
+# stays and the transport is swapped underneath it.
+RUN mkdir -p -m 0700 /root/.ssh \
+ && ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null \
+ && git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
-RUN cargo build --release --workspace --locked
+# The agent is forwarded in for the duration of this one instruction. Nothing
+# is written to a layer, so the image carries no credential — which is the
+# whole reason this is a mount and not a build argument.
+RUN --mount=type=ssh cargo build --release --workspace --locked
 
 # ── the node ────────────────────────────────────────────────────────────────
 # Built from source in a stage of its own so that the version of the engine this
@@ -33,11 +43,13 @@ RUN cargo build --release --workspace --locked
 FROM rust:1.98-slim-bookworm AS engine
 ARG TESSARIDB_REF=dev
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
  && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p -m 0700 /root/.ssh \
+ && ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null
 WORKDIR /engine
-RUN git clone --depth 1 --branch "${TESSARIDB_REF}" \
-      https://github.com/TessariDB/TessariDB.git . \
+RUN --mount=type=ssh git clone --depth 1 --branch "${TESSARIDB_REF}" \
+      git@github.com:TessariDB/TessariDB.git . \
  && cargo build --release -p tessari-cli --bin tessaridb --locked
 
 # ── run ─────────────────────────────────────────────────────────────────────
