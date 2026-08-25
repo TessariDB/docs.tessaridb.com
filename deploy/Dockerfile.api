@@ -39,7 +39,7 @@ RUN --mount=type=ssh cargo build --release --workspace --locked
 # ── the node ────────────────────────────────────────────────────────────────
 # Built from source in a stage of its own so that the version of the engine this
 # image runs is pinned in one place and is visible in the build log. The build
-# argument is a tag or a revision of the engine repository.
+# argument is a branch, a tag, or a commit of the engine repository.
 FROM rust:1.98-slim-bookworm AS engine
 ARG TESSARIDB_REF=dev
 # `clang` and `libclang-dev` because the storage engine's bindings are generated
@@ -54,8 +54,16 @@ RUN apt-get update \
 RUN mkdir -p -m 0700 /root/.ssh \
  && ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null
 WORKDIR /engine
-RUN --mount=type=ssh git clone --depth 1 --branch "${TESSARIDB_REF}" \
-      git@github.com:TessariDB/TessariDB.git . \
+# Fetched rather than cloned, because `git clone --branch` takes a branch or a
+# tag and refuses a commit — and a commit is exactly what a deployment should
+# name. `fetch` accepts all three, so this line does not care which one it was
+# given. `rev-parse` then puts the resolved commit in the build log, where the
+# question "which engine is this image running" is answered without guessing.
+RUN --mount=type=ssh git init -q . \
+ && git remote add origin git@github.com:TessariDB/TessariDB.git \
+ && git fetch -q --depth 1 origin "${TESSARIDB_REF}" \
+ && git checkout -q FETCH_HEAD \
+ && echo "engine revision: $(git rev-parse HEAD)" \
  && cargo build --release -p tessari-cli --bin tessaridb --locked
 
 # ── run ─────────────────────────────────────────────────────────────────────

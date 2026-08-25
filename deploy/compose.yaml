@@ -36,8 +36,11 @@ services:
       ssh:
         - default
       args:
-        # Which revision of the engine this image runs. Pinned here rather than
-        # floating, so that rebuilding an old image gives the old engine.
+        # Which revision of the engine this image runs. A commit here rather
+        # than a branch is what makes rebuilding an old image give back the old
+        # engine; a branch gives whatever it pointed at on the day of the build.
+        # It doubles as the cache key for the clone-and-compile layer, so moving
+        # it is also how a rebuild is made to actually fetch the engine again.
         TESSARIDB_REF: ${TESSARIDB_REF:-dev}
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
