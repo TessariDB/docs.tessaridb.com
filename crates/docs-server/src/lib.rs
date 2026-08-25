@@ -4,12 +4,22 @@
 //! The server holds no content and caches none: every route is a statement
 //! against TessariDB, which is the point of the site.
 //!
-//! # Two accounts, not one and not none
+//! # Two questions, answered in two different places
 //!
-//! "Anyone may read" is a fact about **this API**, not about the store. A store
-//! with users in it has no anonymous access at all, so the public read routes
-//! run as a `viewer` account this process holds, and the write routes run as
-//! whoever the caller says they are. Both refusals then come from the store.
+//! **Who is asking** is this API's question, and it is answered against the
+//! `account` and `token` tables: a person signs in with a password and is given
+//! a token that works for a day. A person is not a database user.
+//!
+//! **What may travel on this connection** stays the store's question. The store
+//! holds two service accounts and neither is a person: the read routes run as a
+//! `viewer` and the write routes as an `editor`. So a routing mistake that sent
+//! a write down the read path would still be refused — by the database, with
+//! "a viewer may not write", whatever this server believed it was doing.
+//!
+//! Keeping the second half is the whole reason the first half is safe to add.
+//! An API that authenticated its own users *and* held one all-powerful database
+//! connection would have exactly one thing standing between a reader and a
+//! write, and it would be this code.
 //!
 //! # A connection per request
 //!
@@ -21,21 +31,31 @@
 //! complexity before there is a measurement saying so.
 
 pub mod auth;
+pub mod identity;
 pub mod routes;
+pub mod session;
 
 use std::sync::Arc;
 
 use docs_store::{Fault, Store};
 
-pub use crate::auth::Caller;
+pub use crate::auth::{Caller, Presented};
+use crate::identity::Throttle;
 
-/// What every handler needs: where the node is, which version to read, and the
-/// account the public reads run as.
+/// What every handler needs: where the node is, which version to read, the two
+/// service accounts, and the bound on password guessing.
+///
+/// The two accounts are set by two different calls rather than by two arguments
+/// of the same type, because a pair of `Option<(String, String)>` parameters is
+/// a pair that can be swapped — and swapping these two would hand the public
+/// read path an editor's connection while compiling perfectly.
 #[derive(Clone, Debug)]
 pub struct Site {
     node: Arc<str>,
     namespace: Arc<str>,
     reading_as: Option<Arc<(String, String)>>,
+    writing_as: Option<Arc<(String, String)>>,
+    throttle: Arc<Throttle>,
 }
 
 impl Site {
@@ -50,7 +70,28 @@ impl Site {
             node: Arc::from(node),
             namespace: Arc::from(namespace),
             reading_as: reading_as.map(Arc::new),
+            writing_as: None,
+            throttle: Arc::new(Throttle::new()),
         }
+    }
+
+    /// The account the write routes run as. An `editor`.
+    ///
+    /// Set separately and not in [`Site::new`], for the reason on the struct.
+    /// Left unset, every write route refuses — which is the right way round: a
+    /// misconfigured deployment serves the site read-only rather than serving it
+    /// writable to nobody in particular.
+    #[must_use]
+    pub fn writing_as(mut self, credentials: (String, String)) -> Self {
+        self.writing_as = Some(Arc::new(credentials));
+        self
+    }
+
+    /// The bound on how fast a password can be guessed. One per site, shared by
+    /// every request, which is the only way it bounds anything.
+    #[must_use]
+    pub fn throttle(&self) -> &Throttle {
+        &self.throttle
     }
 
     /// A connection for the read routes.
@@ -85,22 +126,24 @@ impl Site {
         Store::connect(&self.node, &self.namespace, credentials).await
     }
 
-    /// A connection carrying the caller's credentials, for the write routes.
+    /// A connection for the write routes, as the `editor` service account.
     ///
-    /// The store decides whether they may write. This function does not look at
-    /// the name it is given.
+    /// It does not carry the caller's identity, because the caller no longer has
+    /// one the database knows about. Reaching this function at all is the proof
+    /// that a token was presented and verified; what it adds on top is the
+    /// store's own refusal for anything an `editor` may not do.
     ///
     /// # Errors
     ///
-    /// Returns [`Fault::Client`] when the node is unreachable **or** when it
-    /// refuses the credentials — which is the same answer to this code and a
-    /// different one to the caller, sorted out in `routes`.
-    pub async fn writer(&self, caller: &Caller) -> Result<Store, Fault> {
-        Store::connect(
-            &self.node,
-            &self.namespace,
-            Some((caller.name.clone(), caller.password.clone())),
-        )
-        .await
+    /// [`Fault::Client`] when the node is unreachable or refuses the account.
+    /// `None` credentials means no writing account was configured, and the
+    /// connection is opened anonymously — which a closed store refuses, so the
+    /// deployment fails closed rather than open.
+    pub async fn writer(&self) -> Result<Store, Fault> {
+        let credentials = self
+            .writing_as
+            .as_ref()
+            .map(|pair| (pair.0.clone(), pair.1.clone()));
+        Store::connect(&self.node, &self.namespace, credentials).await
     }
 }

@@ -9,6 +9,7 @@
 //! rules and that crate holds no connection. What can be got wrong here is
 //! sequencing and statements; what can be got wrong there is meaning.
 
+pub mod accounts;
 pub mod ingest;
 pub mod read;
 pub mod schema;
@@ -30,6 +31,16 @@ pub enum Fault {
     /// and not an input to sanitise.
     #[error("unsafe slug, which should be impossible from a content path: {0}")]
     UnsafeSlug(String),
+
+    /// An account name that cannot be spelled into a record id safely.
+    ///
+    /// Separate from [`Fault::UnsafeSlug`] because this one arrives from a
+    /// request rather than from a file this repository controls, so it is an
+    /// input to refuse and not a mistake to fix at the source. The name is not
+    /// repeated back: a refusal that echoes what was tried is a refusal an
+    /// attacker can read their own probe out of.
+    #[error("that is not a usable account name")]
+    UnsafeName,
 
     /// The node answered, but not with the shape this code reads.
     #[error("the node answered a {found} where {wanted} was expected")]

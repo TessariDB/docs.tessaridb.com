@@ -10,16 +10,22 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+argon2.workspace = true
 axum.workspace = true
 docs-content.workspace = true
 docs-store.workspace = true
+getrandom.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+# `oneshot` drives the router without binding a port, so the authorization tests
+# exercise the real routes rather than a re-implementation of them.
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true

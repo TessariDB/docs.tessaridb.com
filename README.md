@@ -92,27 +92,43 @@ in silence.
 
 ## Who may write
 
-The database decides. There is no second authority.
+Two questions, and they are answered in two different places.
 
-The write routes take the caller's credentials and pass them to the store as
-that connection's credentials, so the refusal — when it comes — is the store's
-own permission check. `401` means *identify yourself*; `403` means *you did, and
-the answer is no*.
+**Who is asking** is the API's question. A person signs in at `POST
+/api/session` with a name and a password and gets a token that works for a day;
+every write carries that token and nothing else. They are not a database user,
+and the database's password never travels with an edit.
 
-Three accounts, because a store with no user is **open** and declaring the first
-one closes it:
+| what | where it lives | what it is worth if stolen |
+|---|---|---|
+| a password | `account.secret`, Argon2id | nothing recoverable in useful time |
+| a token | `token`'s record id is its **SHA-256** | nothing — the table holds no token |
+
+Guessing is bounded before it costs anything: the throttle is asked before the
+store is touched and before a hash is computed, an unknown name spends the same
+work as a wrong password so the clock cannot be asked which names exist, and the
+two refusals are worded identically for the same reason.
+
+**What may travel on this connection** stays the database's question, and that
+is what makes the first half safe to add. The store holds two service accounts
+and neither is a person:
 
 | account | role | used for |
 |---|---|---|
 | `owner` | `owner` | declaring the other two, once, on a fresh store |
 | `reader` | `viewer` | the public read path — a closed store has no anonymous access |
-| `editor` | `editor` | the seed, and the API's `PUT` and `DELETE` |
+| `editor` | `editor` | the connection every write runs on, after its token verified |
 
-The reading account is a `viewer` on purpose: a write attempted on the public
-path is then refused by the *store*, whatever this server believes it is doing.
+The reading account is a `viewer` on purpose: a routing mistake that sent a
+write down the read path is still refused, by the *store*, whatever this server
+believes it is doing. An API that authenticated its own users **and** held one
+all-powerful connection would have exactly one thing between a reader and a
+write, and it would be this code.
+
+`401` means *identify yourself*; `403` means *you did, and the answer is no*.
 
 > [!WARNING]
-> The wire protocol carries no TLS, and Basic sends the password as given. The
+> The wire protocol carries no TLS, and a bearer token is a bearer token. The
 > compose file puts the database and the API on a network declared `internal`
 > and publishes only the front end. If you publish the API, put something that
 > terminates TLS in front of it.

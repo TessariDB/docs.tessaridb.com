@@ -429,3 +429,160 @@ async fn an_empty_store_and_a_populated_one_are_told_apart_by_counting_pages() {
         "the count follows the store rather than a marker set at ingest"
     );
 }
+
+// ── the accounts and tokens the API authorises against ──────────────────────
+//
+// Written here for the same reason as everything else in this file: what can be
+// wrong about these statements is whether the node accepts them, and a mock
+// that agreed with my reading of the grammar would pass while sign-in refused
+// everybody.
+
+#[tokio::test]
+async fn an_account_is_written_and_read_back_whole() {
+    let Some((mut store, _alone)) = store("t_account_roundtrip").await else {
+        return;
+    };
+    assert!(store.account("ann").await.expect("a read").is_none());
+
+    store
+        .put_account("ann", "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA")
+        .await
+        .expect("the account is written");
+
+    let found = store.account("ann").await.expect("a read").expect("ann");
+    assert_eq!(found.name, "ann");
+    assert_eq!(found.secret, "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA");
+}
+
+#[tokio::test]
+async fn writing_an_account_again_replaces_the_secret_rather_than_adding_one() {
+    let Some((mut store, _alone)) = store("t_account_replace").await else {
+        return;
+    };
+    store.put_account("ann", "first").await.expect("written");
+    store.put_account("ann", "second").await.expect("written");
+    let found = store.account("ann").await.expect("a read").expect("ann");
+    assert_eq!(
+        found.secret, "second",
+        "changing the password in the environment must change it in the store"
+    );
+}
+
+#[tokio::test]
+async fn a_name_that_could_break_out_of_a_record_id_is_refused_by_the_store_layer() {
+    let Some((mut store, _alone)) = store("t_account_injection").await else {
+        return;
+    };
+    // The shape of an injection: close the quote, run something else. If this
+    // were spelled into the statement the account table would be emptied.
+    let hostile = "ann'; DELETE FROM account WHERE true; --";
+    assert!(matches!(
+        store.put_account(hostile, "x").await,
+        Err(docs_store::Fault::UnsafeName)
+    ));
+    assert!(matches!(
+        store.account(hostile).await,
+        Err(docs_store::Fault::UnsafeName)
+    ));
+
+    // And the table is untouched: a real account written before is still there.
+    store.put_account("ann", "kept").await.expect("written");
+    assert_eq!(
+        store
+            .account("ann")
+            .await
+            .expect("a read")
+            .expect("ann")
+            .secret,
+        "kept"
+    );
+}
+
+#[tokio::test]
+async fn a_token_is_found_by_its_digest_and_carries_its_expiry() {
+    let Some((mut store, _alone)) = store("t_token_roundtrip").await else {
+        return;
+    };
+    let digest = "a".repeat(64);
+    assert!(store.token(&digest).await.expect("a read").is_none());
+
+    store
+        .put_token(&digest, "ann", 4_102_444_800)
+        .await
+        .expect("the token is written");
+
+    let found = store
+        .token(&digest)
+        .await
+        .expect("a read")
+        .expect("a token");
+    assert_eq!(found.account, "ann");
+    assert_eq!(found.expires, 4_102_444_800);
+
+    store.delete_token(&digest).await.expect("deleted");
+    assert!(store.token(&digest).await.expect("a read").is_none());
+}
+
+#[tokio::test]
+async fn something_that_is_not_a_digest_is_refused_before_it_reaches_a_statement() {
+    let Some((mut store, _alone)) = store("t_token_digest_shape").await else {
+        return;
+    };
+    for candidate in [
+        "",
+        "short",
+        &"z".repeat(64),
+        "'; DELETE FROM token WHERE true; --",
+    ] {
+        assert!(
+            matches!(
+                store.token(candidate).await,
+                Err(docs_store::Fault::UnsafeName)
+            ),
+            "{candidate} should not be accepted as a digest"
+        );
+    }
+}
+
+#[tokio::test]
+async fn purging_removes_what_has_expired_and_keeps_what_has_not() {
+    let Some((mut store, _alone)) = store("t_token_purge").await else {
+        return;
+    };
+    let stale = "b".repeat(64);
+    let live = "c".repeat(64);
+    store
+        .put_token(&stale, "ann", 1_000)
+        .await
+        .expect("written");
+    store
+        .put_token(&live, "ann", 4_102_444_800)
+        .await
+        .expect("written");
+
+    store.purge_tokens(2_000).await.expect("purged");
+
+    assert!(store.token(&stale).await.expect("a read").is_none());
+    assert!(store.token(&live).await.expect("a read").is_some());
+}
+
+#[tokio::test]
+async fn removing_an_account_removes_the_tokens_it_was_holding() {
+    let Some((mut store, _alone)) = store("t_account_tokens_go_too").await else {
+        return;
+    };
+    let digest = "d".repeat(64);
+    store.put_account("ann", "secret").await.expect("written");
+    store
+        .put_token(&digest, "ann", 4_102_444_800)
+        .await
+        .expect("written");
+
+    store.delete_account("ann").await.expect("removed");
+
+    assert!(store.account("ann").await.expect("a read").is_none());
+    assert!(
+        store.token(&digest).await.expect("a read").is_none(),
+        "an account nobody can sign in to whose token still works is not removed"
+    );
+}

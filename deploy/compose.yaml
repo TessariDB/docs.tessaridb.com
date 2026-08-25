@@ -99,6 +99,13 @@ services:
       DOCS_PASSWORD: ${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}
       DOCS_READER_USER: ${DOCS_READER_USER:-reader}
       DOCS_READER_PASSWORD: ${DOCS_READER_PASSWORD:?set it in deploy/.env}
+      # The first person who may edit. Seeded into the API's own `account` table
+      # on every start, so changing it here changes it in the store. This is not
+      # a database user: it buys a day-long token, and the token is what the
+      # write routes accept. Left unset, nothing is seeded and only accounts
+      # already in the store can sign in.
+      DOCS_ADMIN_USER: ${DOCS_ADMIN_USER:-}
+      DOCS_ADMIN_PASSWORD: ${DOCS_ADMIN_PASSWORD:-}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       db:
@@ -107,10 +114,11 @@ services:
         # store and be refused a moment later, when the owner's declaration
         # closes it.
         condition: service_healthy
-    # No `ports`. The API is reachable only from the front end's container.
-    # Publishing 8080 would put it on the host's network, where Basic over plain
-    # HTTP would carry the editor's password; do it only deliberately, and only
-    # behind something that terminates TLS.
+    # No `ports`. The API is reachable only from the front end's container and
+    # from the store network. Publishing 8080 would put it on the host's network,
+    # where a token — and, at /api/session, a password — would travel in the
+    # clear; do it only deliberately, and only behind something that terminates
+    # TLS.
     expose:
       - "8080"
     networks:

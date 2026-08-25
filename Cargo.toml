@@ -35,6 +35,21 @@ thiserror = "2"
 log = { version = "0.4", features = ["std"] }
 env_logger = "0.11"
 
+# Authorization. All three are RustCrypto and none of this is hand-rolled: a
+# password hash, a random token and a digest are the three places where an
+# improvised version is indistinguishable from a correct one until somebody
+# reads a dump.
+#
+# `argon2` for passwords, because it is memory-hard and the crate's defaults
+# track the OWASP guidance. `sha2` for tokens, because a 256-bit random token
+# needs a fast digest and not a slow one — the slowness of Argon2 buys nothing
+# against an input with no guessable structure, and would be paid on every
+# request. `getrandom` for the token itself, straight from the operating
+# system's generator rather than from anything seeded by a clock.
+argon2 = "0.5"
+sha2 = "0.10"
+getrandom = "0.3"
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_docs = "warn"

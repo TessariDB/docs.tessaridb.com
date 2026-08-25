@@ -21,17 +21,18 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use docs_content::parse;
+use docs_store::Fault;
 use docs_store::ingest::Section;
-use docs_store::{Fault, Store};
 use serde::Deserialize;
 
-use crate::{Site, auth};
+use crate::{Site, session};
 
 /// Every route the site serves.
 pub fn router(site: Site) -> Router {
     Router::new()
+        .route("/api/session", post(session::issue).delete(session::revoke))
         .route("/api/nav", get(nav))
         .route("/api/search", get(search))
         .route(
@@ -170,7 +171,7 @@ async fn put_page(
         Ok(page) => page,
         Err(fault) => return message(StatusCode::BAD_REQUEST, &fault.to_string()),
     };
-    let mut store = match writer(&site, &headers).await {
+    let mut store = match session::authorized(&site, &headers).await {
         Ok(store) => store,
         Err(refusal) => return *refusal,
     };
@@ -185,7 +186,7 @@ async fn delete_page(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let mut store = match writer(&site, &headers).await {
+    let mut store = match session::authorized(&site, &headers).await {
         Ok(store) => store,
         Err(refusal) => return *refusal,
     };
@@ -213,7 +214,7 @@ async fn put_section(
         order: asked.order,
         icon: asked.icon,
     };
-    let mut store = match writer(&site, &headers).await {
+    let mut store = match session::authorized(&site, &headers).await {
         Ok(store) => store,
         Err(refusal) => return *refusal,
     };
@@ -228,7 +229,7 @@ async fn delete_section(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let mut store = match writer(&site, &headers).await {
+    let mut store = match session::authorized(&site, &headers).await {
         Ok(store) => store,
         Err(refusal) => return *refusal,
     };
@@ -239,35 +240,8 @@ async fn delete_section(
     }
 }
 
-/// A connection carrying the caller's credentials, or the response that says why
-/// there is not one.
-///
-/// The only thing decided here is whether credentials were *presented*. Whether
-/// they are good, and whether that user may write, is the store's answer.
-async fn writer(site: &Site, headers: &HeaderMap) -> Result<Store, Box<Response>> {
-    let header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok());
-    let Some(caller) = auth::caller(header) else {
-        return Err(Box::new(challenge()));
-    };
-    site.writer(&caller)
-        .await
-        .map_err(|fault| Box::new(refused(&fault)))
-}
-
-/// 401, with the challenge a client needs in order to ask for credentials.
-fn challenge() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, "Basic realm=\"docs\"")],
-        "credentials required",
-    )
-        .into_response()
-}
-
 /// Turns a store fault into the status that tells the caller what to do next.
-fn refused(fault: &Fault) -> Response {
+pub(crate) fn refused(fault: &Fault) -> Response {
     match fault {
         // A slug that cannot be a record id came from the request, so it is the
         // request that is wrong.
@@ -275,6 +249,10 @@ fn refused(fault: &Fault) -> Response {
             StatusCode::BAD_REQUEST,
             &format!("not a usable path: {slug}"),
         ),
+        // Same class, different source: this one arrived in a request rather
+        // than from a content path, and the fault deliberately does not repeat
+        // it back.
+        Fault::UnsafeName => message(StatusCode::BAD_REQUEST, &fault.to_string()),
         Fault::Client(_) if fault.refusal().is_some() => {
             // The store said no. That is about this caller and this statement,
             // never about the server being broken — 403, and the store's own
@@ -294,7 +272,7 @@ fn refused(fault: &Fault) -> Response {
     }
 }
 
-fn json<T: serde::Serialize>(status: StatusCode, body: &T) -> Response {
+pub(crate) fn json<T: serde::Serialize>(status: StatusCode, body: &T) -> Response {
     match serde_json::to_string(body) {
         Ok(text) => (
             status,
@@ -309,7 +287,7 @@ fn json<T: serde::Serialize>(status: StatusCode, body: &T) -> Response {
     }
 }
 
-fn message(status: StatusCode, said: &str) -> Response {
+pub(crate) fn message(status: StatusCode, said: &str) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],

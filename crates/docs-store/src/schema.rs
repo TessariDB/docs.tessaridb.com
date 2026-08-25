@@ -52,6 +52,17 @@ DEFINE TABLE IF NOT EXISTS fragment;
 DEFINE TABLE IF NOT EXISTS holds EDGE;
 DEFINE BUCKET IF NOT EXISTS asset;
 
+-- Who may edit this site, which is a different question from who may reach the
+-- database. The store's own users are two service accounts — a viewer the read
+-- routes run as and an editor the write routes run as — and neither of them is
+-- a person. A person is a row here.
+--
+-- `account.secret` is an Argon2id PHC string. `token`'s record id is the
+-- SHA-256 of the token that was handed out, so this table holds nothing that
+-- can be presented to anything: a dump of it is a list of expiry times.
+DEFINE TABLE IF NOT EXISTS account;
+DEFINE TABLE IF NOT EXISTS token;
+
 DEFINE FIELD IF NOT EXISTS text ON fragment TYPE string ANALYZER prose;
 DEFINE INDEX IF NOT EXISTS by_text ON fragment FIELDS text SEARCH;
 "

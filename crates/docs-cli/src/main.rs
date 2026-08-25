@@ -235,11 +235,70 @@ async fn serve(asked: &Asked) -> Result<(), String> {
              while the store has no users at all"
         ),
     }
-    let site = Site::new(&asked.node, &asked.namespace, reading_as);
+    // The account the write routes run as. It is not the caller: a person signs
+    // in against the `account` table and holds a token, and the store still sees
+    // an `editor` on the connection. Absent, every write refuses — which is the
+    // right way to fail, since the alternative is a site that is writable by
+    // nobody the database can name.
+    let writing_as = credentials("DOCS_USER", "DOCS_PASSWORD")?;
+    match &writing_as {
+        Some((name, _)) => log::info!("writes run as {name}"),
+        None => log::warn!(
+            "DOCS_USER is not set, so the write routes have no store account and \
+             will refuse"
+        ),
+    }
+
+    let mut site = Site::new(&asked.node, &asked.namespace, reading_as);
+    if let Some(pair) = writing_as.clone() {
+        site = site.writing_as(pair);
+    }
+
+    // The first person who may edit, from the deployment's secrets — the same
+    // way the store's own accounts arrive. Written every start rather than once,
+    // so changing the password in the environment changes it in the store, and
+    // so a store restored from a backup without this row gets it back.
+    seed_editor(&site).await?;
+
     axum::serve(listener, routes::router(site))
         .with_graceful_shutdown(stopped())
         .await
         .map_err(|fault| format!("the server stopped: {fault}"))
+}
+
+/// Writes the `DOCS_ADMIN_USER` account from the environment, if there is one.
+///
+/// Absent, nothing is created and nobody can obtain a token — which is a site
+/// that serves and cannot be edited, not a site anyone can edit. That is the
+/// safe direction for a missing secret to fail in.
+///
+/// The password is hashed here and the plaintext never reaches the store.
+async fn seed_editor(site: &Site) -> Result<(), String> {
+    let Some((name, password)) = credentials("DOCS_ADMIN_USER", "DOCS_ADMIN_PASSWORD")? else {
+        log::warn!(
+            "DOCS_ADMIN_USER is not set, so no account is seeded from the \
+             environment. Only accounts already in the store can sign in; if \
+             there are none, the site serves and cannot be edited."
+        );
+        return Ok(());
+    };
+    if password.len() < 12 {
+        // Refused rather than warned about. A short password on the one account
+        // that may rewrite the site is not a preference.
+        return Err("DOCS_ADMIN_PASSWORD is shorter than 12 characters".to_owned());
+    }
+    let secret = docs_server::identity::hash(&password)
+        .map_err(|fault| format!("could not hash the editor password: {fault}"))?;
+    let mut store = site
+        .writer()
+        .await
+        .map_err(|fault| format!("could not reach the store to write the editor: {fault}"))?;
+    store
+        .put_account(&name, &secret)
+        .await
+        .map_err(|fault| format!("could not write the editor account: {fault}"))?;
+    log::info!("the editor account {name} is present");
+    Ok(())
 }
 
 /// Replaces the store's contents, and says what it wrote.

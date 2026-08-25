@@ -24,13 +24,71 @@
 //! here, in the deployment, and on the site's own operations page, rather than
 //! left to be discovered.
 
-/// A name and a password, on their way to the store.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A name and a password, on their way to be checked.
+///
+/// `Debug` is written by hand. Nothing in this crate prints a `Caller`, and that
+/// is exactly the state in which a derived `Debug` is a loaded gun: the day
+/// somebody adds a trace line to a handler, the password goes to the log with
+/// it. The client SDK writes its own for the same reason on the same kind of
+/// type.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Caller {
-    /// The user name, as the store spells it.
+    /// The user name, as it is typed at the API.
     pub name: String,
     /// The password, as given.
     pub password: String,
+}
+
+impl std::fmt::Debug for Caller {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Caller")
+            .field("name", &self.name)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+/// A bearer token as it arrived, before anything has been decided about it.
+///
+/// Same reason for the hand-written `Debug`: this one *is* the credential.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Presented(String);
+
+impl Presented {
+    /// The token as presented.
+    #[must_use]
+    pub fn reveal(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Presented {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Presented(<redacted>)")
+    }
+}
+
+/// Reads `Authorization: Bearer …`.
+///
+/// Returns `None` when the header is absent, is not Bearer, or carries nothing
+/// after the scheme — all of which are the same thing to a caller: they did not
+/// present a token.
+///
+/// The value is not validated here beyond being non-empty. What a token *is* is
+/// `identity`'s business, and what it grants is the store's.
+#[must_use]
+pub fn presented(header: Option<&str>) -> Option<Presented> {
+    let value = header?;
+    let (scheme, token) = value.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    Some(Presented(token.to_owned()))
 }
 
 /// Reads `Authorization: Basic …`.
