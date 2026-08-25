@@ -1,0 +1,25 @@
+[package]
+name = "docs-store"
+description = "The schema, the ingest and the reads. Everything that needs a running node."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+docs-content.workspace = true
+log.workspace = true
+serde.workspace = true
+tessaridb-client.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+docs-content.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
