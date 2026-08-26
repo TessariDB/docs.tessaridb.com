@@ -93,11 +93,11 @@ export function Footer() {
           <strong>TessariDB 0.0.1-alpha</strong> &middot; &copy; 2026 boogvar
         </p>
         <p>
-          Business Source License 1.1. Free for personal use, for non-commercial
-          use, and for evaluation, development and testing. Any other production
-          use needs a commercial licence &mdash;{" "}
+          Business Source License 1.1. Free in production, including
+          commercially. The one restriction is offering TessariDB to third
+          parties as a database service, which needs a commercial licence
+          &mdash;{" "}
           <a href="mailto:licensing@tessaridb.com">licensing@tessaridb.com</a>.
-          Converts to Apache&nbsp;2.0 on 24 August 2030.
         </p>
       </div>
     </footer>
