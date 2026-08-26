@@ -37,7 +37,15 @@ export function ScrollReset() {
           return;
         }
       }
-      window.scrollTo(0, 0);
+      // `instant`, against the `scroll-behavior: smooth` this site sets. Moving
+      // *within* a page should glide — that is what the outline links are for,
+      // and the motion is what tells the reader they have not changed page. A
+      // navigation is the opposite: the old page is gone, and animating its
+      // scroll position to the top is half a second of scenery from a document
+      // nobody is looking at any more. Measured at 500ms from 2500px, and it is
+      // also what made this reset hard to test — every measurement caught the
+      // animation somewhere in the middle.
+      window.scrollTo({ top: 0, behavior: "instant" });
     });
     return () => cancelAnimationFrame(frame);
   }, [here]);
