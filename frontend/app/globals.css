@@ -718,6 +718,14 @@ a:hover {
   .brand small {
     display: none;
   }
+  /* A diagram scrolls rather than shrinks. `max-width: 100%` alone put the
+     560-unit drawing into 316px on a phone — a 56% scale, which renders its
+     13px labels at 7.3px and makes the diagram decoration rather than
+     information. Below this width the container scrolls, which the reader can
+     do something about; illegible text is not. */
+  .prose .diagram svg {
+    min-width: 30rem;
+  }
   /* One column rather than four squeezed ones. The about column keeps its
      place at the top, so the footer opens with what the site is. */
   .footer-grid {
