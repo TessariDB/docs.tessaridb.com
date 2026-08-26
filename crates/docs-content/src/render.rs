@@ -198,7 +198,10 @@ Writes them.
         // rather than the rare one.
         let html = to_html("| a | b |\n|---|---|\n| 1 | 2 |\n");
         assert!(html.contains("<div class=\"table-scroll\">"), "{html}");
-        assert!(html.ends_with("</div>\n") || html.contains("</table>\n</div>"), "{html}");
+        assert!(
+            html.ends_with("</div>\n") || html.contains("</table>\n</div>"),
+            "{html}"
+        );
         // One wrapper per table, not one for the document.
         let two = to_html("| a |\n|---|\n| 1 |\n\ntext\n\n| b |\n|---|\n| 2 |\n");
         assert_eq!(two.matches("class=\"table-scroll\"").count(), 2, "{two}");
