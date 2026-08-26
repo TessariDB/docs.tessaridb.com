@@ -457,6 +457,12 @@ a:hover {
 .search {
   position: relative;
   flex: 0 1 24rem;
+  /* A flex item's `min-width` is `auto`, which means "no smaller than your
+     content" — so this refused to shrink below the width of the field plus its
+     key hint, and at 390px the header came to 458 and pushed the theme button
+     48px off the right of the page. The whole document then scrolled sideways,
+     on every page, because of the header. Nothing about the article was wrong. */
+  min-width: 0;
 }
 .search-field {
   display: flex;
