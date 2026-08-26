@@ -30,6 +30,8 @@ pub enum Task {
     Ingest,
     /// Serve the API.
     Serve,
+    /// Write the content tree to a running site, over its API.
+    Publish,
 }
 
 /// A parsed command line, with every default already applied.
@@ -47,15 +49,29 @@ pub struct Asked {
     pub bind: String,
     /// Whether `serve` rebuilds the store before it takes traffic.
     pub ingest_first: bool,
+    /// `publish`: the site to write to, as a URL.
+    pub site: String,
+    /// `publish`: the account to sign in as.
+    pub user: Option<String>,
+    /// `publish`: whether to write, rather than only say what would be written.
+    pub apply: bool,
+    /// `publish`: whether a page the site has and the corpus lacks is removed.
+    pub prune: bool,
 }
 
 /// What to print when the command line does not parse, and for `--help`.
+/// The default for `--to`.
+pub const SITE: &str = "DOCS_SITE";
+/// The default for `--user` on `publish`.
+pub const PUBLISH_USER: &str = "DOCS_PUBLISH_USER";
+
 pub const USAGE: &str = "\
 docs — the documentation site for TessariDB
 
   docs check                     read content/ and report what is wrong with it
   docs ingest                    replace what the store holds with content/
   docs serve                     serve the API, seeding the store only if empty
+  docs publish --to <url>        write content/ to a running site, over its API
 
 The store owns the content. content/ is where it is written and reviewed, and
 what an empty store is seeded from — but pages are also edited through the API,
@@ -67,6 +83,10 @@ Options
   --namespace <ns>   the documentation version         (default: v0_0_1_alpha)
   --bind <host:port> where the API listens, serve only (default: 127.0.0.1:8080)
   --ingest           serve: replace what the store holds first. Destructive.
+  --to <url>         publish: the site to write to, e.g. https://docs.example
+  --user <name>      publish: the account to sign in as
+  --apply            publish: write. Without it, publish only says what it would
+  --prune            publish: also remove pages the site has and content/ lacks
   --help             this
   --version          the version this was built from
 
@@ -79,6 +99,9 @@ Environment
   DOCS_PASSWORD      that user's password
   DOCS_READER_USER   the store user the public reads run as — a viewer
   DOCS_READER_PASSWORD  that user's password
+  DOCS_SITE          the default for --to
+  DOCS_PUBLISH_USER  the default for --user
+  DOCS_PUBLISH_PASSWORD the publishing account's password, for publish
 
 A store with no users is open; declaring the first one closes it, and a closed
 store refuses anonymous sessions for reads as well as writes. So a deployed
@@ -86,7 +109,13 @@ site needs DOCS_READER_USER, and it should name a viewer: the store is then
 what refuses a write on the public path, rather than this server's routing.
 
 The address is a bare host:port. There is no URL scheme, because the protocol
-is not carried over HTTP.
+is not carried over HTTP. --to is different and is a URL, because that one is
+HTTP and needs to say whether it is TLS.
+
+publish and ingest do the same job from opposite sides. ingest runs beside the
+store and replaces everything it holds; publish runs anywhere, writes only what
+differs, and removes nothing unless asked. A deployment seeds with ingest and is
+maintained with publish.
 ";
 
 /// Either the parsed arguments, or something to print and the code to exit with.
@@ -112,11 +141,12 @@ pub fn read(words: &[String], environment: &dyn Fn(&str) -> Option<String>) -> R
         "check" => Task::Check,
         "ingest" => Task::Ingest,
         "serve" => Task::Serve,
+        "publish" => Task::Publish,
         "--help" | "-h" | "help" => return Read::Say(USAGE.to_owned(), 0),
         "--version" => return Read::Say(format!("docs {}\n", env!("CARGO_PKG_VERSION")), 0),
         other => {
             return Read::Say(
-                format!("{other} is not one of check, ingest or serve\n\n{USAGE}"),
+                format!("{other} is not one of check, ingest, serve or publish\n\n{USAGE}"),
                 2,
             );
         }
@@ -129,12 +159,26 @@ pub fn read(words: &[String], environment: &dyn Fn(&str) -> Option<String>) -> R
         namespace: setting(environment, NAMESPACE, "v0_0_1_alpha"),
         bind: setting(environment, BIND, "127.0.0.1:8080"),
         ingest_first: false,
+        site: setting(environment, SITE, ""),
+        user: environment(PUBLISH_USER).filter(|held| !held.is_empty()),
+        apply: false,
+        prune: false,
     };
 
     while let Some(word) = rest.next() {
         match word.as_str() {
             "--help" | "-h" => return Read::Say(USAGE.to_owned(), 0),
             "--ingest" => asked.ingest_first = true,
+            "--apply" => asked.apply = true,
+            "--prune" => asked.prune = true,
+            "--to" => match rest.next() {
+                Some(value) => asked.site = value.clone(),
+                None => return Read::Say(format!("--to wants a URL\n\n{USAGE}"), 2),
+            },
+            "--user" => match rest.next() {
+                Some(value) => asked.user = Some(value.clone()),
+                None => return Read::Say(format!("--user wants a name\n\n{USAGE}"), 2),
+            },
             "--content" => match rest.next() {
                 Some(value) => asked.content = PathBuf::from(value),
                 None => return missing("--content"),

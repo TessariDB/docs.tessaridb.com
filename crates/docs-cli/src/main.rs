@@ -38,6 +38,7 @@
 
 mod arguments;
 mod corpus;
+mod publish;
 
 use std::process::ExitCode;
 
@@ -84,6 +85,7 @@ async fn run(asked: &Asked) -> Result<(), String> {
         Task::Check => check(asked),
         Task::Ingest => ingest(asked).await,
         Task::Serve => serve(asked).await,
+        Task::Publish => publish::publish(asked).await,
     }
 }
 

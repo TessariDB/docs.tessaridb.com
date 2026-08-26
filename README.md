@@ -82,8 +82,26 @@ this avoids — is read by two commands:
 
 ```sh
 docs check         # parse the tree and report what is wrong with it. No connection.
-docs ingest        # replace what the store holds with it. Destructive.
+docs ingest        # replace what the store holds with it. Destructive. Runs beside the store.
+docs publish       # write it to a running site over the API. Says what it would do first.
 ```
+
+`ingest` and `publish` do the same job from opposite sides, and the difference
+matters. `ingest` runs **beside** the store and replaces everything it holds,
+which is right for seeding an empty one and wrong for a site people edit —
+a stale checkout would delete a month of work in silence. `publish` runs
+**anywhere**, signs in over the API, writes only the pages whose rendering
+would change, and removes nothing unless asked:
+
+```sh
+export DOCS_PUBLISH_PASSWORD=…
+docs publish --to https://docs.example --user ada           # says what it would do
+docs publish --to https://docs.example --user ada --apply   # does it
+docs publish --to https://docs.example --user ada --apply --prune   # and removes
+```
+
+A page the site has and `content/` does not is **named and kept**. `--prune` is
+the only thing that deletes one, and it lists them before it does.
 
 `serve` seeds from such a tree only when the store is **empty** and one happens
 to be there. It never rebuilds a populated store, because pages are edited

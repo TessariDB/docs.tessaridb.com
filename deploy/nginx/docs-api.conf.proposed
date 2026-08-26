@@ -1,0 +1,99 @@
+# PROPOSED — not applied. See `.bgv` Q-DOCS-42 and goal G-DOCS-02.
+#
+# The `location /api/` block below belongs inside the existing
+# `docs.tessaridb.com` TLS server block, above `location /`. It is kept as a
+# separate file rather than merged because applying it is the one step of
+# remote publishing that changes what the internet can reach, and that is the
+# owner's decision rather than an agent's.
+#
+# ---------------------------------------------------------------------------
+# What changes
+#
+# Today the API answers only on the compose network: the front end reaches
+# `api:8080` and nothing outside the host can. `/api/*` from the internet is a
+# `404` produced by `location /` proxying to the front end, which has no such
+# route.
+#
+# With this, `/api/*` reaches the API. The read routes become publicly
+# readable — which is what they already are in substance, since the site
+# renders their content — and the write routes become publicly *reachable*.
+#
+# That last clause is the whole of the risk, stated plainly: `PUT` and `DELETE`
+# on pages and sections go from unreachable-from-the-internet to
+# reachable-but-authenticated. They are token-gated by the API itself, a token
+# needs a password, and a password is Argon2 behind a per-name throttle. That
+# is the same posture as any authenticated API, and it is a real increase over
+# "no route exists".
+#
+# It is worth it because the alternative is worse: without it, publishing a page
+# requires a shell on the host as `root`, so everyone who may edit documentation
+# holds the machine that runs the database.
+#
+# ---------------------------------------------------------------------------
+# Before applying
+#
+#   1. Confirm the API's throttle and token expiry are what you think:
+#      a wrong password costs the same as an unknown name, by design.
+#   2. Decide who holds the publishing account. It should be a named person,
+#      not `editor` — a named account can be revoked without taking the site's
+#      own writes down with it.
+#   3. `nginx -t` before `systemctl reload nginx`.
+#   4. Afterwards, verify from off-host:
+#        curl -s -o /dev/null -w '%{http_code}\n' \
+#          -X PUT https://docs.tessaridb.com/api/page/index      # must be 401
+#        curl -s -u <name> -X POST https://docs.tessaridb.com/api/session
+#
+# ---------------------------------------------------------------------------
+
+# One shared zone for sign-ins across the whole server. Naming it here rather
+# than in the server block is deliberate: `limit_req_zone` is only valid at
+# `http` level, so this line goes in `nginx.conf` or a file included from it.
+#
+# Ten requests a minute per address, with a burst of five. The API already
+# throttles per *name*; this throttles per *source*, which is the half the API
+# cannot see — a caller working through a list of names is invisible to a
+# per-name counter.
+limit_req_zone $binary_remote_addr zone=docs_session:10m rate=10r/m;
+
+# --- inside the docs.tessaridb.com TLS server block, ABOVE `location /` ---
+
+location = /api/session {
+    limit_req zone=docs_session burst=5 nodelay;
+    limit_req_status 429;
+
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 30s;
+}
+
+location /api/ {
+    # A page is prose. Two mebibytes is far more than any page here and far
+    # less than a request worth absorbing from somebody who is not publishing.
+    client_max_body_size 2m;
+
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+}
+
+# ---------------------------------------------------------------------------
+# The compose change that goes with it
+#
+# `api` currently publishes no port. It needs one on **loopback only** — the
+# TLS terminator is on the host and is the only thing that should reach it:
+#
+#   api:
+#     ports:
+#       - "127.0.0.1:8080:8080"
+#
+# Binding `0.0.0.0:8080` instead would put a plaintext copy of the API beside
+# the TLS one, on a port anybody can reach, and every rule above would be
+# bypassable by asking the other door.
