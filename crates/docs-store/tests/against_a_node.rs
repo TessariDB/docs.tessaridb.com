@@ -586,3 +586,138 @@ async fn removing_an_account_removes_the_tokens_it_was_holding() {
         "an account nobody can sign in to whose token still works is not removed"
     );
 }
+
+#[tokio::test]
+async fn half_a_word_finds_the_word_it_is_the_start_of() {
+    let Some((mut store, _alone)) = store("t_partial").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // The defect this exists for: a reader typing `analyz` was told the site
+    // holds nothing about analyzers, because `analyz` is not the word the
+    // index holds and a search over words alone has no way to say "keep going".
+    let hits = store.search("analyz", 10).await.expect("a search");
+    let first = hits.first().expect("a half-typed word found nothing");
+    assert_eq!(
+        first.heading, "Analyzers",
+        "the passage the word is about is not first: {hits:?}"
+    );
+    // And it is *scored*, which is the part a scan cannot do. Finding the
+    // fragments is the easy half; putting the page the word is about above the
+    // page that mentions it once is the half the reader notices.
+    assert!(
+        first.relevance > 0.0,
+        "the leading hit came from the scan, so the order is the store's and not the ranking's: {first:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_finished_word_is_answered_by_the_index_and_still_scored() {
+    let Some((mut store, _alone)) = store("t_still_ranked").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // The second pass must not cost the first one anything. A whole word is
+    // still the index's question, and a scored hit still leads.
+    let hits = store.search("analyzer", 10).await.expect("a search");
+    let first = hits.first().expect("a hit");
+    assert_eq!(first.heading, "Analyzers");
+    assert!(
+        first.relevance > 0.0,
+        "the leading hit lost its score, so the ranked pass is no longer first: {first:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_fragment_both_passes_find_is_returned_once() {
+    let Some((mut store, _alone)) = store("t_no_double").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // `analyzer` is both a word the index holds and a run of characters in the
+    // text, so both passes find the same fragment. Without the check between
+    // them the reader sees it twice — the second time unscored, below results
+    // that scored lower than it did.
+    let hits = store.search("analyzer", 20).await.expect("a search");
+    let mut seen: Vec<(String, String)> = hits
+        .iter()
+        .map(|hit| (hit.page.clone(), hit.anchor.clone()))
+        .collect();
+    let held = seen.len();
+    seen.sort();
+    seen.dedup();
+    assert_eq!(held, seen.len(), "a fragment came back twice: {hits:?}");
+}
+
+#[tokio::test]
+async fn the_words_already_typed_still_bind_the_one_being_typed() {
+    let Some((mut store, _alone)) = store("t_partial_narrows").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // `search analyz` is one word and one half of one. The half is looked for
+    // as characters, but the whole word is still asked of the index — so this
+    // narrows to the analyzer passage rather than widening to everything the
+    // letters appear in.
+    let hits = store.search("search analyz", 10).await.expect("a search");
+    assert!(
+        hits.iter().any(|hit| hit.heading == "Analyzers"),
+        "the finished word and the partial one found nothing together: {hits:?}"
+    );
+    assert!(
+        hits.iter().all(|hit| hit.page == "query-language/search"),
+        "the finished word stopped binding: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn one_letter_does_not_open_a_scan() {
+    let Some((mut store, _alone)) = store("t_floor").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // A single letter is a prefix of nearly every fragment, and answering it
+    // with nearly every fragment is not an answer. What the floor stops is the
+    // *second* pass: `a` is a word this corpus holds, so the index answers it
+    // and those hits are scored and correct. An unscored hit here would mean
+    // the scan had run — which is what the assertion is watching for, since the
+    // rows a scan adds look no different from the rows the index found.
+    for typed in ["a", "an"] {
+        let hits = store.search(typed, 10).await.expect("a search");
+        assert!(
+            hits.iter().all(|hit| hit.relevance > 0.0),
+            "{typed:?} opened a scan on one keystroke: {hits:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_wildcard_a_reader_types_is_not_a_wildcard() {
+    let Some((mut store, _alone)) = store("t_wildcard").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // The pattern is built from letters and digits only. If it were built from
+    // the query as typed, `%` would be "every fragment in the store" and `_`
+    // would be "every fragment holding at least one character" — a reader
+    // could ask for the whole corpus by typing one key.
+    for typed in ["%", "%%", "_", "%_%"] {
+        let hits = store.search(typed, 10).await.expect("a search");
+        assert!(
+            hits.is_empty(),
+            "{typed:?} reached the pattern as a wildcard: {hits:?}"
+        );
+    }
+}

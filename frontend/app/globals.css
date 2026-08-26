@@ -372,6 +372,65 @@ a:hover {
   font-size: 0.85rem;
 }
 
+/* A block that can be told to wrap.
+   The shell exists to hold the button: it cannot live inside the `pre`, which
+   scrolls, or it would scroll out of the corner it is meant to sit in. */
+.prose .code-block {
+  position: relative;
+  margin: 1.3rem 0;
+}
+.prose .code-block > pre {
+  /* The shell takes the margin so the button's corner is the block's corner. */
+  margin: 0;
+}
+.code-wrap {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Opaque, and with a ring of the block's own background around it. It sits
+     over the code, so being faint would not make it less in the way — it would
+     make it a smudge with characters showing through. Quiet is the colour's
+     job, not the alpha's. */
+  box-shadow: 0 0 0 4px var(--code-bg);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.code-block.wrappable .code-wrap {
+  display: flex;
+}
+.code-wrap:hover,
+.code-wrap:focus-visible,
+.code-block.wrapped .code-wrap {
+  color: var(--brand-bright);
+  border-color: var(--brand-bright);
+}
+.code-block.wrappable > pre {
+  /* Room for the button at the end of the longest line, so scrolling to read
+     the tail of a statement does not park it underneath. Wrapped, this is what
+     keeps every line clear of the button rather than only the last one. */
+  padding-right: 2.9rem;
+}
+.code-block.wrapped > pre {
+  overflow-x: hidden;
+  /* `anywhere` rather than `break-word`: the lines this is for are long because
+     of one unbroken token — a path, a base64 value, a 90-character string —
+     and `break-word` leaves exactly those overflowing. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Wide content scrolls inside itself; the page never scrolls sideways. */
 .prose .table-scroll {
   overflow-x: auto;

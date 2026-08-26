@@ -1,4 +1,5 @@
 import type { Page } from "@/lib/api";
+import { CodeWrap } from "./CodeWrap";
 import { Alert } from "./icons";
 
 /**
@@ -30,6 +31,8 @@ export function Article({ page }: { page: Page }) {
             users the store lets write — see the API's renderer for what that
             assumption rests on. */}
         <div className="prose" dangerouslySetInnerHTML={{ __html: page.html }} />
+        {/* Decorates what the renderer emitted, after it is on the page. */}
+        <CodeWrap />
       </article>
 
       <Outline headings={page.outline} />
