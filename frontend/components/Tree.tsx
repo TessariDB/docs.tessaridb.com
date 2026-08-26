@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import type { TreeNode } from "@/lib/api";
-import { named } from "./icons";
+import { useNav } from "./Nav";
+import { Chevron, Close, named } from "./icons";
 
 /**
  * The left-hand tree.
@@ -15,45 +16,93 @@ import { named } from "./icons";
  * same component recursing, not three hand-written cases.
  *
  * A client component because it marks the current page, which needs the path,
- * and because on a narrow screen it collapses. The data itself is fetched on
- * the server and passed in.
+ * and because on a narrow screen it is a drawer.
  *
- * The collapse is state rather than a `<details>` element because the tree must
- * be a plain always-open list on a wide screen, and a `<details>` is either open
- * or closed for everybody: forcing a closed one visible with CSS depends on
- * overriding the way the browser hides its own children, which is not a
- * guarantee worth resting a navigation on. Here the button is hidden above
- * 860px and the list is unconditionally shown, so the desktop tree does not
- * depend on state at all.
+ * # Why a drawer rather than the expansion it replaced
+ *
+ * It used to be a list that appeared *above* the article, pushing it down by a
+ * full screen of links — so reaching the first paragraph of each page meant
+ * scrolling past the whole table of contents, on every page in turn, and the
+ * only way to dismiss it was the button that opened it, by then off-screen.
+ * Over the article instead: the article stays where it is, a tap anywhere else
+ * closes it, and `Escape` closes it.
+ *
+ * # Why the sections collapse only once it is open
+ *
+ * All of them are expanded in the markup, which is what a wide screen wants and
+ * what a reader with no JavaScript gets. Collapsing happens in an effect when
+ * the drawer opens, so it is an interaction rather than a render — no media
+ * query, no hydration mismatch, and the wide-screen column is untouched. The
+ * section holding the current page stays open, because a reader who opens the
+ * navigation is asking *where am I*, not only *where else could I go*.
  */
 export function Tree({ nodes }: { nodes: TreeNode[] }) {
-  const [open, setOpen] = useState(false);
+  const { open, setOpen } = useNav();
   const here = usePathname();
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
 
-  // Following a link closes it. Otherwise the reader taps a page and lands
-  // behind the same wall of navigation they just tapped through.
-  useEffect(() => setOpen(false), [here]);
+  useEffect(() => {
+    if (!open) return;
+    setFolded(
+      new Set(
+        nodes
+          .filter((node) => node.kind !== "page" && !holds(node, here))
+          .map((node) => node.slug),
+      ),
+    );
+  }, [open, nodes, here]);
+
+  function fold(slug: string) {
+    setFolded((was) => {
+      const next = new Set(was);
+      if (!next.delete(slug)) next.add(slug);
+      return next;
+    });
+  }
 
   return (
-    <nav className={open ? "sidebar open" : "sidebar"} aria-label="Documentation">
-      <button
-        type="button"
-        className="tree-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((was) => !was)}
-      >
-        Contents
-      </button>
+    <nav
+      id="documentation-tree"
+      className={open ? "sidebar open" : "sidebar"}
+      aria-label="Documentation"
+    >
+      <div className="drawer-head">
+        <span>Contents</span>
+        <button
+          type="button"
+          className="drawer-close"
+          onClick={() => setOpen(false)}
+          aria-label="Close navigation"
+        >
+          <Close size={18} />
+        </button>
+      </div>
       <ul className="tree">
         {nodes.map((node) => (
-          <Branch key={node.slug} node={node} depth={0} />
+          <Branch key={node.slug} node={node} depth={0} folded={folded} fold={fold} />
         ))}
       </ul>
     </nav>
   );
 }
 
-function Branch({ node, depth }: { node: TreeNode; depth: number }) {
+/** Whether this section, at any depth, contains the page being read. */
+function holds(node: TreeNode, here: string): boolean {
+  if (node.kind === "page") return `/${node.slug}` === here;
+  return node.children.some((child) => holds(child, here));
+}
+
+function Branch({
+  node,
+  depth,
+  folded,
+  fold,
+}: {
+  node: TreeNode;
+  depth: number;
+  folded: ReadonlySet<string>;
+  fold: (slug: string) => void;
+}) {
   const here = usePathname();
 
   if (node.kind === "page") {
@@ -68,15 +117,26 @@ function Branch({ node, depth }: { node: TreeNode; depth: number }) {
   }
 
   const Icon = named(node.icon);
+  const shut = folded.has(node.slug);
+
   return (
-    <li className={depth === 0 ? "tree-section" : "tree-section tree-sub"}>
-      <div className="tree-label">
+    <li
+      className={depth === 0 ? "tree-section" : "tree-section tree-sub"}
+      data-folded={shut ? "yes" : undefined}
+    >
+      <button
+        type="button"
+        className="tree-label"
+        aria-expanded={!shut}
+        onClick={() => fold(node.slug)}
+      >
         {depth === 0 ? <Icon size={14} /> : null}
-        {node.title}
-      </div>
+        <span>{node.title}</span>
+        <Chevron size={14} />
+      </button>
       <ul>
         {node.children.map((child) => (
-          <Branch key={child.slug} node={child} depth={depth + 1} />
+          <Branch key={child.slug} node={child} depth={depth + 1} folded={folded} fold={fold} />
         ))}
       </ul>
     </li>

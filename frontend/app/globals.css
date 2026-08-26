@@ -126,7 +126,22 @@ a:hover {
 .brand:hover {
   text-decoration: none;
 }
-.brand small {
+/* "Docs", so a reader who arrived on a deep link knows what the rest of the
+   site is. Separated from the mark by a rule rather than by spacing, because
+   the two are different things: one is the product, one is this. */
+.header-what {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.7rem;
+  margin-left: 0.15rem;
+  border-left: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 560;
+  white-space: nowrap;
+}
+.header-what small {
   font-weight: 500;
   font-size: 0.7rem;
   color: var(--text-faint);
@@ -175,10 +190,42 @@ a:hover {
   padding: 0;
 }
 
-.tree-section > .tree-label {
+/* A section heading is a button so the drawer can fold it. On a wide screen
+   nothing folds and it has to read as a heading, so the button chrome is
+   stripped back to exactly what the `div` it replaced looked like. */
+.tree-label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tree-label > span {
+  flex: 1;
+}
+/* The affordance for folding. Shown everywhere, because a button that looks
+   like a heading is a button nobody knows they can press — and one that is
+   focusable but inert is worse than either. Drawn pointing right and rotated
+   when open, so the two states are one shape and cannot disagree. */
+.tree-label > svg:last-child {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+.tree-section[data-folded] > .tree-label > svg:last-child {
+  transform: none;
+}
+.tree-section[data-folded] > ul {
+  display: none;
+}
+
+.tree-section > .tree-label {
   margin: 1.35rem 0 0.4rem;
   color: var(--text);
   font-size: 0.7rem;
@@ -186,7 +233,7 @@ a:hover {
   text-transform: uppercase;
   letter-spacing: 0.07em;
 }
-.tree-section > .tree-label svg {
+.tree-section > .tree-label > svg:first-child {
   color: var(--brand);
 }
 
@@ -551,6 +598,104 @@ a:hover {
   overflow: hidden;
 }
 
+/* The way out of the dropdown, kept apart from the hits so it does not read as
+   one of them. */
+.result-all {
+  border-top: 1px solid var(--border);
+  color: var(--brand);
+  font-size: 0.82rem;
+  font-weight: 550;
+}
+
+/* ── the search page ───────────────────────────────────────────────────── */
+
+.searchpage {
+  max-width: var(--measure);
+  padding: 2.5rem 0 5rem;
+}
+.searchpage h1 {
+  margin: 0 0 1.25rem;
+}
+.searchpage-form {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.15rem 0.15rem 0.15rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+.searchpage-form:focus-within {
+  border-color: var(--brand);
+}
+.searchpage-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+}
+.searchpage-form button {
+  padding: 0.55rem 1.1rem;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--brand);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 560;
+  cursor: pointer;
+}
+.searchpage-note,
+.searchpage-count {
+  margin: 1.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.searchpage-hits {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+.searchpage-hits a {
+  display: block;
+  padding: 0.9rem 1rem;
+  margin-left: -1rem;
+  border-radius: var(--radius);
+  color: inherit;
+}
+.searchpage-hits a:hover {
+  background: var(--bg-sunken);
+  text-decoration: none;
+}
+.searchpage-where {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+.searchpage-heading {
+  display: block;
+  margin-top: 0.1rem;
+  font-weight: 580;
+  color: var(--brand);
+}
+.searchpage-text {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  /* Three rather than the dropdown's two: here the passage is what the reader
+     is judging, not a hint at which page to open. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* ── controls ──────────────────────────────────────────────────────────── */
 
 .icon-button {
@@ -570,35 +715,95 @@ a:hover {
   border-color: var(--border-strong);
 }
 
-/* The disclosure that opens the tree on a narrow screen. Hidden above 860px,
-   where the tree is a column and needs no affordance at all. */
-.tree-toggle {
+/* ── the navigation drawer ─────────────────────────────────────────────── */
+
+/* The control that opens it, and the head and backdrop that belong to it. All
+   three are hidden above 860px, where the tree is a column that is simply
+   there. They are styled here rather than inside the media query so that the
+   narrow-screen block holds only what changes with the width. */
+.nav-button,
+.drawer-head,
+.nav-backdrop,
+.search-link {
   display: none;
+}
+
+/* Stands in for the search box on a narrow screen. Sized and coloured like the
+   theme toggle beside it, because they are the same kind of thing. */
+.search-link {
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+}
+.search-link:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.nav-button {
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.nav-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.drawer-head {
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  padding: 0.55rem 0;
+  padding: 0 0.15rem 0.9rem;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 660;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.drawer-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
   background: none;
   border: 0;
   color: var(--text-muted);
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   cursor: pointer;
 }
-.tree-toggle::after {
-  content: "+";
-  font-size: 1.1rem;
-  font-weight: 400;
-  line-height: 1;
-}
-.sidebar.open .tree-toggle::after {
-  content: "−";
-}
-.tree-toggle:hover {
+.drawer-close:hover {
   color: var(--text);
+}
+
+/* Always rendered, made visible by the class, so opening and closing are one
+   transition instead of an element appearing and then fading. */
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.nav-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ── the footer ────────────────────────────────────────────────────────── */
@@ -692,31 +897,61 @@ a:hover {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
-  /* The tree stays reachable but stops standing between the reader and the
-     text. Left expanded it is a full screen of navigation above every article,
-     which on a phone means scrolling past the whole table of contents to reach
-     the first paragraph of each page in turn. */
+  /* The tree goes *over* the article rather than above it. Expanded in place it
+     was a full screen of navigation between the reader and every page they
+     opened, and the only way to dismiss it was the button that opened it,
+     which by then had been scrolled off the top. */
   .sidebar {
-    position: static;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(20rem, 86vw);
     max-height: none;
-    padding: 0.75rem 0 0;
-    border-bottom: 1px solid var(--border);
+    padding: 1rem 1.1rem calc(2rem + env(safe-area-inset-bottom));
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    /* Off-screen rather than hidden, so it slides and so its links are not in
+       the tab order while it is shut. */
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 0.22s ease,
+      visibility 0.22s;
+    overscroll-behavior: contain;
   }
-  .sidebar .tree {
-    display: none;
-    padding-bottom: 0.75rem;
+  .sidebar.open {
+    transform: none;
+    visibility: visible;
   }
-  .sidebar.open .tree {
-    display: block;
-  }
-  .tree-toggle {
+  .nav-button,
+  .drawer-head {
     display: flex;
   }
-  .search {
-    flex: 1;
+  .nav-backdrop {
+    display: block;
   }
-  .brand small {
+
+  /* Rows a thumb can hit without aiming. */
+  .tree a {
+    padding: 0.5rem 0.6rem;
+  }
+
+  .search {
     display: none;
+  }
+  .search-link {
+    display: flex;
+  }
+  /* The mark and "Docs" carry it; the version is detail a phone header has no
+     room for and a reader on one is not choosing between builds. */
+  .header-what small {
+    display: none;
+  }
+  /* The search page is the page here, so it gets the width the article had. */
+  .searchpage {
+    padding-top: 1.5rem;
   }
   /* A diagram scrolls rather than shrinks. `max-width: 100%` alone put the
      560-unit drawing into 316px on a phone — a 56% scale, which renders its

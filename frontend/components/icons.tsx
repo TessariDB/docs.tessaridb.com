@@ -256,3 +256,36 @@ export function named(icon: string | null): (props: Props) => React.ReactElement
       return Records;
   }
 }
+
+/** The navigation control on a narrow screen: three rules, thumb-sized. */
+export function Menu(props: Props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7 H20" />
+      <path d="M4 12 H20" />
+      <path d="M4 17 H20" />
+    </Svg>
+  );
+}
+
+/** Dismissing something that opened over the page. */
+export function Close(props: Props) {
+  return (
+    <Svg {...props}>
+      <path d="M6 6 L18 18" />
+      <path d="M18 6 L6 18" />
+    </Svg>
+  );
+}
+
+/**
+ * A section that opens. Drawn pointing right and rotated by the stylesheet when
+ * its section is open, so the two states are one shape and cannot disagree.
+ */
+export function Chevron(props: Props) {
+  return (
+    <Svg {...props}>
+      <path d="M9.5 5 L16.5 12 L9.5 19" />
+    </Svg>
+  );
+}

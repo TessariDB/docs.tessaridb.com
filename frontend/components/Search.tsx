@@ -81,23 +81,35 @@ export function Search() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
+  /** Where "see all results" goes, and what Enter falls through to. */
+  const everything = `/search?q=${encodeURIComponent(query.trim())}`;
+
   function onKeyDown(event: React.KeyboardEvent) {
-    if (!hits || hits.length === 0) return;
+    if (!hits || hits.length === 0) {
+      // With nothing in the dropdown Enter still means *search* — it goes to
+      // the page, which can say why there is nothing better than a box can.
+      if (event.key === "Enter" && query.trim().length >= 2) {
+        event.preventDefault();
+        window.location.href = everything;
+      }
+      return;
+    }
+    // One past the last hit is "see all results", so arrowing to the bottom and
+    // pressing Enter does the obvious thing rather than nothing.
+    const stops = hits.length + 1;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActive((at) => (at + 1) % hits.length);
+      setActive((at) => (at + 1) % stops);
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActive((at) => (at - 1 + hits.length) % hits.length);
+      setActive((at) => (at - 1 + stops) % stops);
     }
     if (event.key === "Enter") {
+      event.preventDefault();
       const chosen = hits[active];
-      if (chosen) {
-        event.preventDefault();
-        window.location.href = link(chosen);
-        setHits(null);
-      }
+      window.location.href = chosen ? link(chosen) : everything;
+      setHits(null);
     }
   }
 
@@ -146,6 +158,20 @@ export function Search() {
               <div className="result-text">{hit.text}</div>
             </Link>
           ))}
+          {/* A dropdown holds what it holds. This is the way out of it, and it
+              is a row in the list rather than a link beside it so that the
+              keyboard reaches it the same way the mouse does. */}
+          <Link
+            href={everything}
+            className="result result-all"
+            role="option"
+            aria-selected={active === hits.length}
+            data-active={active === hits.length}
+            onMouseEnter={() => setActive(hits.length)}
+            onClick={() => setHits(null)}
+          >
+            See all results for <strong>{query.trim()}</strong>
+          </Link>
         </div>
       )}
     </div>

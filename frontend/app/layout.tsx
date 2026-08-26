@@ -3,10 +3,12 @@ import Link from "next/link";
 import { connection } from "next/server";
 
 import { Footer } from "@/components/Footer";
+import { NavBackdrop, NavButton, NavProvider } from "@/components/Nav";
+import { ScrollReset } from "@/components/ScrollReset";
 import { Search } from "@/components/Search";
 import { Tree } from "@/components/Tree";
 import { BEFORE_PAINT, ThemeToggle } from "@/components/Theme";
-import { Mark } from "@/components/icons";
+import { Mark, Search as SearchIcon } from "@/components/icons";
 import { type TreeNode, nav } from "@/lib/api";
 import "./globals.css";
 
@@ -65,23 +67,44 @@ export default async function Layout({ children }: { children: React.ReactNode }
         <script dangerouslySetInnerHTML={{ __html: BEFORE_PAINT }} />
       </head>
       <body>
-        <header className="header">
-          <Link href="/" className="brand">
-            <Mark />
-            TessariDB
-            <small>0.0.1-alpha</small>
-          </Link>
-          <div className="header-spacer" />
-          <Search />
-          <ThemeToggle />
-        </header>
+        <NavProvider>
+          <ScrollReset />
+          <header className="header">
+            <Link href="/" className="brand">
+              <Mark />
+              TessariDB
+            </Link>
+            {/* Named, because a reader arriving on a deep link from a search
+                engine sees a page about a database and no indication that the
+                rest of the site is its documentation rather than its marketing.
+                The version sits with it: both answer "what am I reading". */}
+            <span className="header-what">
+              Docs
+              <small>0.0.1-alpha</small>
+            </span>
+            <div className="header-spacer" />
+            <Search />
+            {/* On a phone the live dropdown is the wrong shape — it covers the
+                page it is searching, and the header has no room for a field
+                worth typing into once the mark, "Docs" and two controls have
+                had theirs. So the box gives way to this, and the results get a
+                page of their own instead of a panel over the article. */}
+            <Link href="/search" className="search-link" aria-label="Search the documentation">
+              <SearchIcon size={18} />
+            </Link>
+            <ThemeToggle />
+            <NavButton />
+          </header>
 
-        <div className="layout">
-          <Tree nodes={tree} />
-          <main className="main">{children}</main>
-        </div>
+          <NavBackdrop />
 
-        <Footer />
+          <div className="layout">
+            <Tree nodes={tree} />
+            <main className="main">{children}</main>
+          </div>
+
+          <Footer />
+        </NavProvider>
       </body>
     </html>
   );
