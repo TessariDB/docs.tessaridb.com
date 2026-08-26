@@ -601,6 +601,81 @@ a:hover {
   color: var(--text);
 }
 
+/* ── the footer ────────────────────────────────────────────────────────── */
+
+.footer {
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.footer-grid {
+  display: grid;
+  /* The about column earns twice the width; the three link columns share the
+     rest and collapse together rather than one at a time. */
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 2.5rem;
+  max-width: 90rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 2rem;
+}
+.footer-about p {
+  margin: 0.7rem 0 0;
+  max-width: 28rem;
+}
+.footer-note {
+  color: var(--text-faint);
+}
+.footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+.footer-brand:hover {
+  text-decoration: none;
+  color: var(--brand);
+}
+.footer-links h2 {
+  margin: 0 0 0.8rem;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 660;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.footer-links ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.footer-links li {
+  margin-bottom: 0.45rem;
+}
+.footer-links a {
+  color: var(--text-muted);
+}
+.footer-links a:hover {
+  color: var(--brand);
+}
+.footer-legal {
+  border-top: 1px solid var(--border);
+  max-width: 90rem;
+  margin: 0 auto;
+  padding: 1.4rem 1.25rem 2.5rem;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+.footer-legal p {
+  margin: 0 0 0.4rem;
+  max-width: 58rem;
+}
+.footer-legal strong {
+  color: var(--text-muted);
+}
+
 /* ── narrow screens ────────────────────────────────────────────────────── */
 
 @media (max-width: 1180px) {
@@ -642,5 +717,12 @@ a:hover {
   }
   .brand small {
     display: none;
+  }
+  /* One column rather than four squeezed ones. The about column keeps its
+     place at the top, so the footer opens with what the site is. */
+  .footer-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    padding: 2.5rem 1.25rem 1.5rem;
   }
 }

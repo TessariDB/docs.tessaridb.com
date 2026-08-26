@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 
+import { Footer } from "@/components/Footer";
 import { Search } from "@/components/Search";
 import { Tree } from "@/components/Tree";
 import { BEFORE_PAINT, ThemeToggle } from "@/components/Theme";
@@ -79,6 +80,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
           <Tree nodes={tree} />
           <main className="main">{children}</main>
         </div>
+
+        <Footer />
       </body>
     </html>
   );
