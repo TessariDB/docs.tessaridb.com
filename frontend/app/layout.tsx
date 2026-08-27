@@ -10,12 +10,45 @@ import { Tree } from "@/components/Tree";
 import { BEFORE_PAINT, ThemeToggle } from "@/components/Theme";
 import { Mark, Search as SearchIcon } from "@/components/icons";
 import { type TreeNode, nav } from "@/lib/api";
+import { origin, tagline } from "@/lib/site";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  /*
+   * Without this every relative URL in the metadata below resolves against
+   * nothing and Next drops it. It cannot be taken from the request: this server
+   * sits behind a TLS terminator and sees a loopback `Host` over plain http, so
+   * a derived base would publish `http://127.0.0.1:3000` as the canonical origin
+   * of the documentation.
+   */
+  metadataBase: new URL(origin),
   title: { default: "TessariDB", template: "%s — TessariDB" },
-  description:
-    "Records, graphs, full-text and vectors in one store, and one language over all of them.",
+  description: tagline,
+  applicationName: "TessariDB documentation",
+  /*
+   * `max-snippet: -1` matters more here than on a marketing site. These pages
+   * answer questions, and a result truncated at the default length cuts the
+   * answer off in the middle of the qualification that makes it correct —
+   * "at-least-once, with idempotent application by…" is worse than no snippet.
+   */
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+    },
+  },
+  openGraph: {
+    type: "website",
+    siteName: "TessariDB documentation",
+    title: "TessariDB documentation",
+    description: tagline,
+    url: origin,
+  },
+  twitter: { card: "summary", title: "TessariDB documentation", description: tagline },
 };
 
 /**
