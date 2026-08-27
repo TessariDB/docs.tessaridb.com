@@ -86,6 +86,17 @@ services:
       # The client SDK is a private repository; same reason as above.
       ssh:
         - default
+    ports:
+      # Loopback only, and for the same reason the front end binds loopback: the
+      # public edge is the TLS terminator on the host, and this is what it
+      # proxies to. Binding every interface would publish a plaintext copy of
+      # the API beside the TLS one, on a port anybody can reach, and every rule
+      # the edge applies — the rate limit on sign-in, the body cap — would be
+      # bypassable by asking the other door.
+      #
+      # Docker writes its own firewall rules ahead of ufw's, so this prefix is a
+      # control and not a preference.
+      - "${DOCS_API_BIND:-127.0.0.1:8080}:8080"
     environment:
       # The service name, not loopback: the database is a different container.
       TESSARIDB_ADDRESS: db:7654
