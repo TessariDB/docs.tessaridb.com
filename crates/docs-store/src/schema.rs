@@ -31,16 +31,36 @@ pub fn is_safe_slug(slug: &str) -> bool {
             .all(|character| character.is_alphanumeric() || matches!(character, '-' | '_' | '/'))
 }
 
+/// `DEFINE NAMESPACE`, on its own.
+///
+/// Separate from [`statements`] because it is the one part of the schema that
+/// needs authority over the **store** rather than over this namespace, and the
+/// account this server runs as is deliberately narrower than that.
+///
+/// A namespace is a sibling of every other namespace, so declaring one is not
+/// shaping the data you own — the engine reserves it for an owner holding no
+/// tenancy of their own. Asking for it on every start would mean asking for
+/// authority this server should not have, and getting a refusal in the ordinary
+/// case where the namespace is already there.
+///
+/// So the caller asks first and only declares what is missing. See
+/// [`Store::migrate`](crate::Store::migrate).
+#[must_use]
+pub fn define_namespace(namespace: &str) -> String {
+    format!("DEFINE NAMESPACE IF NOT EXISTS {namespace};")
+}
+
 /// Every statement the site's schema is made of, in order.
 ///
 /// `namespace` is the version this doc set belongs to — a namespace per released
 /// version, so switching version is switching namespace and an old version is
 /// never a filter somebody forgets to apply.
+///
+/// The namespace itself is **not** here — see [`define_namespace`].
 #[must_use]
 pub fn statements(namespace: &str) -> String {
     format!(
-        "DEFINE NAMESPACE IF NOT EXISTS {namespace};
-USE NAMESPACE {namespace};
+        "USE NAMESPACE {namespace};
 DEFINE DATABASE IF NOT EXISTS docs;
 USE DATABASE docs;
 
@@ -77,7 +97,7 @@ pub fn use_namespace(namespace: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_slug, statements, use_namespace};
+    use super::{define_namespace, is_safe_slug, statements, use_namespace};
 
     #[test]
     fn a_slug_that_could_close_a_quoted_id_is_refused() {
@@ -142,7 +162,11 @@ mod tests {
 
     #[test]
     fn the_namespace_is_the_version() {
-        assert!(statements("v0_2_0").contains("DEFINE NAMESPACE IF NOT EXISTS v0_2_0"));
+        assert!(define_namespace("v0_2_0").contains("DEFINE NAMESPACE IF NOT EXISTS v0_2_0"));
+        assert!(
+            !statements("v0_2_0").contains("DEFINE NAMESPACE"),
+            "the schema must not ask for store-wide authority on every start"
+        );
         assert_eq!(
             use_namespace("v0_2_0"),
             "USE NAMESPACE v0_2_0;\nUSE DATABASE docs;\n"

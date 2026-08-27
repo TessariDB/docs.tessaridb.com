@@ -87,24 +87,32 @@ if [ -n "${DOCS_OWNER_PASSWORD:-}" ] \
   READER="${DOCS_READER_USER:-reader}"
   EDITOR="${DOCS_EDITOR_USER:-editor}"
 
+  # The store-wide owner FIRST, and it is not a nicety. Some statements have no
+  # tenancy to check because their subject is the store itself — `BACKUP` reads
+  # every namespace, and `DEFINE NAMESPACE` adds a sibling to every other one —
+  # so they need an owner holding no tenancy of their own. A deployment whose
+  # widest account is scoped to one database cannot back itself up, and cannot
+  # be repaired afterwards: a scoped owner may not declare a wider user, and a
+  # closed store has no anonymous session that could.
+  #
+  # The namespace is declared here too, by the same account and for the same
+  # reason, so the API's own narrow account never has to ask for it.
   if tessaridb --at "${LOCAL}" -e "
-        DEFINE NAMESPACE IF NOT EXISTS ${NAMESPACE};
-        USE NAMESPACE ${NAMESPACE};
-        DEFINE DATABASE IF NOT EXISTS docs;
-        USE DATABASE docs;
-        DEFINE USER ${OWNER} ON ${NAMESPACE}.docs ROLE owner PASSWORD '${DOCS_OWNER_PASSWORD}';
+        DEFINE USER ${OWNER} ROLE owner PASSWORD '${DOCS_OWNER_PASSWORD}';
       " >/dev/null 2>&1; then
-    log "declared ${OWNER}; the store is now closed to anonymous sessions"
+    log "declared ${OWNER} over the whole store; it is now closed to anonymous sessions"
     # From here the owner must sign in, because the statement above took effect
     # the moment it committed.
     TESSARIDB_PASSWORD="${DOCS_OWNER_PASSWORD}" tessaridb \
       --at "${LOCAL}" --user "${OWNER}" -e "
+        DEFINE NAMESPACE IF NOT EXISTS ${NAMESPACE};
         USE NAMESPACE ${NAMESPACE};
+        DEFINE DATABASE IF NOT EXISTS docs;
         USE DATABASE docs;
         DEFINE USER ${READER} ON ${NAMESPACE}.docs ROLE viewer PASSWORD '${DOCS_READER_PASSWORD}';
         DEFINE USER ${EDITOR} ON ${NAMESPACE}.docs ROLE editor PASSWORD '${DOCS_EDITOR_PASSWORD}';
       " >/dev/null
-    log "declared ${READER} (viewer) and ${EDITOR} (editor)"
+    log "declared ${NAMESPACE}.docs, ${READER} (viewer) and ${EDITOR} (editor)"
   else
     log "the store already has users; leaving them alone"
   fi

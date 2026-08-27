@@ -104,14 +104,71 @@ impl Store {
 
     /// Applies the schema. Safe to call on every start.
     ///
+    /// # Why the namespace is asked about rather than declared
+    ///
+    /// Declaring a namespace needs authority over the **store**, because a
+    /// namespace is a sibling of every other one — and the account this server
+    /// runs as is deliberately narrower, scoped to a single database. Issuing
+    /// `DEFINE NAMESPACE IF NOT EXISTS` unconditionally would therefore ask for
+    /// authority this server should not hold, and be refused on every start
+    /// once the store is closed, in the ordinary case where the namespace has
+    /// existed since the deployment was set up.
+    ///
+    /// So it is looked for first, and declared only when genuinely absent —
+    /// where the refusal, if it comes, names a real misconfiguration rather
+    /// than an over-broad request.
+    ///
     /// # Errors
     ///
     /// Returns [`Fault::Client`] when a definition is refused.
     pub async fn migrate(&mut self) -> Result<(), Fault> {
+        if !self.has_namespace().await? {
+            log::info!(
+                "namespace {} is not there yet — declaring it",
+                self.namespace
+            );
+            let script = schema::define_namespace(&self.namespace);
+            self.run(&script).await?;
+        }
         let script = schema::statements(&self.namespace);
         self.run(&script).await?;
         log::info!("schema applied in namespace {}", self.namespace);
         Ok(())
+    }
+
+    /// Whether the store already holds this store's namespace.
+    ///
+    /// `INFO FOR STORE` is a **read**, and it reports only what the caller could
+    /// have found out anyway — so asking costs no authority beyond what this
+    /// server already has.
+    async fn has_namespace(&mut self) -> Result<bool, Fault> {
+        let answers = self.run("INFO FOR STORE;").await?;
+        // `INFO FOR STORE` answers one value — an object with a `namespaces`
+        // array — rather than a record set, so `records` is the wrong reader.
+        // Matched on the shape rather than searched for in a rendering: a
+        // namespace called `docs` must not be found because some other field
+        // happens to contain the word.
+        let Some(Answer::Value { value, .. }) = answers.last() else {
+            return Err(Fault::Unexpected {
+                wanted: "the store's namespaces",
+                found: "something else",
+            });
+        };
+        let Value::Object(fields) = value else {
+            return Err(Fault::Unexpected {
+                wanted: "an object",
+                found: "another kind of value",
+            });
+        };
+        let Some(Value::Array(namespaces)) = fields.get("namespaces") else {
+            return Err(Fault::Unexpected {
+                wanted: "a `namespaces` array",
+                found: "an object without one",
+            });
+        };
+        Ok(namespaces
+            .iter()
+            .any(|held| matches!(held, Value::String(name) if *name == self.namespace)))
     }
 
     /// Runs a script with no bound parameters.
