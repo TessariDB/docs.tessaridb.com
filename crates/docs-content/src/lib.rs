@@ -63,13 +63,33 @@ pub struct Page {
 
 /// Reads one source file into a [`Page`].
 ///
+/// # The section comes from the slug when the front matter does not name one
+///
+/// A page is placed in the tree by a `holds` edge from its section, and that
+/// edge is written only when the page knows which section it belongs to. The
+/// **disk** path supplied that from the directory the file was found in, so
+/// almost no page in `content/` declares `section` — and the **API** path had
+/// nothing to supply it from, so every page written through the API was stored
+/// correctly, served correctly, and vanished from the navigation.
+///
+/// It is derived here rather than at each caller so the two paths agree by
+/// construction. A slug already carries the answer: `query-language/graphs`
+/// belongs to `query-language`, and a slug with no `/` — the home page — belongs
+/// to no section, which is why it is absent from the tree and correct to be.
+///
+/// An explicitly declared section still wins, so the corpus reader's
+/// mismatch check keeps its subject.
+///
 /// # Errors
 ///
 /// Returns the [`Fault`] that stopped it — see that type. A file that parses
 /// produces a page with every part present.
 pub fn parse(slug: &str, source: &str) -> Result<Page, Fault> {
-    let (front, markdown) = front::split(source)?;
+    let (mut front, markdown) = front::split(source)?;
     let (headings, fragments) = fragment::split(&front.title, markdown);
+    if front.section.is_none() {
+        front.section = section_of(slug);
+    }
     Ok(Page {
         slug: slug.to_owned(),
         title: front.title.clone(),
@@ -80,9 +100,56 @@ pub fn parse(slug: &str, source: &str) -> Result<Page, Fault> {
     })
 }
 
+/// The section a slug sits in, or nothing when it sits at the root.
+///
+/// The **immediate** parent, because the tree nests sections inside sections:
+/// `a/b/c` is held by `a/b`, which is in turn held by `a`.
+fn section_of(slug: &str) -> Option<String> {
+    let (section, _) = slug.rsplit_once('/')?;
+    (!section.is_empty()).then(|| section.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Fault, parse};
+
+    #[test]
+    fn a_page_that_declares_no_section_takes_it_from_its_slug() {
+        // The defect this closes: a page written through the API was stored and
+        // served but never linked into the tree, because nothing told it which
+        // section it belonged to. The disk path took that from the directory;
+        // the API had no directory. The slug has the answer either way.
+        let source = "+++\ntitle = \"Stream ingestion\"\norder = 58\n+++\n\nbody\n";
+        let page = parse("query-language/stream-ingestion", source).expect("a page");
+        assert_eq!(page.front.section.as_deref(), Some("query-language"));
+    }
+
+    #[test]
+    fn a_declared_section_still_wins_so_the_mismatch_check_keeps_its_subject() {
+        // The corpus reader refuses a page whose front matter names a section
+        // other than the directory it was found in. Deriving over the top of a
+        // declaration would make that check unable to fire.
+        let source = "+++\ntitle = \"Records\"\nsection = \"guides\"\n+++\n\nbody\n";
+        let page = parse("query-language/records", source).expect("a page");
+        assert_eq!(page.front.section.as_deref(), Some("guides"));
+    }
+
+    #[test]
+    fn a_page_at_the_root_belongs_to_no_section() {
+        // The home page. It is absent from the tree on purpose — it is not a
+        // link in its own navigation — and this is why that is correct rather
+        // than the same bug wearing a different hat.
+        let source = "+++\ntitle = \"TessariDB\"\n+++\n\nbody\n";
+        let page = parse("index", source).expect("a page");
+        assert_eq!(page.front.section, None);
+    }
+
+    #[test]
+    fn a_nested_page_belongs_to_its_immediate_section() {
+        let source = "+++\ntitle = \"Deep\"\n+++\n\nbody\n";
+        let page = parse("a/b/c", source).expect("a page");
+        assert_eq!(page.front.section.as_deref(), Some("a/b"));
+    }
 
     #[test]
     fn a_page_arrives_with_every_part_present() {
