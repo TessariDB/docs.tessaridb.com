@@ -1,0 +1,135 @@
+# Generated. Do not edit by hand.
+# Produced by tessari-conformance's `documented` suite from FieldKind,
+# Function::ALL and FORMS. Regenerate when that suite tells you to.
+kind	any
+kind	array
+kind	bool
+kind	bytes
+kind	datetime
+kind	decimal
+kind	duration
+kind	float
+kind	geometry
+kind	int
+kind	literal union
+kind	number
+kind	object
+kind	range
+kind	record
+kind	regex
+kind	set
+kind	string
+kind	table
+kind	uuid
+function	array::distinct
+function	array::first
+function	array::flatten
+function	array::join
+function	array::last
+function	array::len
+function	array::reverse
+function	array::slice
+function	array::sort
+function	crypto::sha256
+function	crypto::sha512
+function	geo::area
+function	geo::contains
+function	geo::covered_by
+function	geo::covers
+function	geo::disjoint
+function	geo::distance
+function	geo::equals
+function	geo::intersects
+function	geo::touches
+function	geo::within
+function	math::abs
+function	math::ceil
+function	math::floor
+function	math::pow
+function	math::round
+function	math::sqrt
+function	object::keys
+function	object::len
+function	object::values
+function	rand::uuid
+function	search::score
+function	string::concat
+function	string::len
+function	string::lower
+function	string::replace
+function	string::slice
+function	string::split
+function	string::trim
+function	string::upper
+function	time::bucket
+function	time::day
+function	time::from_unix
+function	time::hour
+function	time::minute
+function	time::month
+function	time::now
+function	time::second
+function	time::unix
+function	time::year
+function	type::bool
+function	type::datetime
+function	type::float
+function	type::int
+function	type::of
+function	type::string
+function	type::uuid
+function	vector::cosine
+function	vector::dot
+function	vector::euclidean
+form	ALTER TABLE
+form	ALTER TABLE ALTER FIELD
+form	ALTER USER
+form	BACKUP
+form	BEGIN
+form	CANCEL
+form	COMMIT
+form	CREATE
+form	DEFINE ANALYZER
+form	DEFINE BUCKET
+form	DEFINE CONSUMER
+form	DEFINE DATABASE
+form	DEFINE FIELD
+form	DEFINE INDEX
+form	DEFINE NAMESPACE
+form	DEFINE NODE
+form	DEFINE REPLICA
+form	DEFINE SPACE
+form	DEFINE TABLE
+form	DEFINE USER
+form	DEL
+form	DELETE
+form	DELETE FROM
+form	DROP ANALYZER
+form	DROP CONSUMER
+form	DROP DATABASE
+form	DROP FIELD
+form	DROP INDEX
+form	DROP NAMESPACE
+form	DROP REPLICA
+form	DROP TABLE
+form	DROP USER
+form	EXPLAIN
+form	GET
+form	GRANT
+form	GRANT ON REACH	excused
+form	INFO FOR
+form	KEYS
+form	LET
+form	PUT
+form	READ
+form	REBUILD INDEX
+form	RELATE
+form	RETURN
+form	REVOKE
+form	REVOKE ON REACH	excused
+form	SELECT
+form	SET
+form	THROW
+form	UPDATE
+form	UPSERT
+form	USE
