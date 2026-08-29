@@ -116,7 +116,7 @@ form	DROP USER
 form	EXPLAIN
 form	GET
 form	GRANT
-form	GRANT ON REACH	excused
+form	GRANT ON REACH
 form	INFO FOR
 form	KEYS
 form	LET
@@ -126,7 +126,7 @@ form	REBUILD INDEX
 form	RELATE
 form	RETURN
 form	REVOKE
-form	REVOKE ON REACH	excused
+form	REVOKE ON REACH
 form	SELECT
 form	SET
 form	THROW
