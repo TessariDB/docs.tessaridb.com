@@ -146,7 +146,9 @@ impl Store {
             return Err(Fault::UnsafeName);
         }
         self.run_with(
-            &format!("DELETE FROM token WHERE account = $name;\nDELETE account:'{name}';"),
+            &format!(
+                "DELETE FROM token WHERE account = $name LIMIT ALL;\nDELETE account:'{name}';"
+            ),
             vec![("name".to_owned(), text(name))],
         )
         .await?;
@@ -225,7 +227,7 @@ impl Store {
     /// [`Fault::Client`] when the node refuses.
     pub async fn purge_tokens(&mut self, moment: i64) -> Result<(), Fault> {
         self.run_with(
-            "DELETE FROM token WHERE expires < $moment;",
+            "DELETE FROM token WHERE expires < $moment LIMIT ALL;",
             vec![("moment".to_owned(), integer(moment))],
         )
         .await?;

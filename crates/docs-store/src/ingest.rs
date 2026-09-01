@@ -79,8 +79,13 @@ impl Store {
         // delete with no condition as naming one record by identity and refuses
         // it, deliberately, so that a mistyped `DELETE FROM page` cannot empty a
         // table. Emptying one is therefore always asked for out loud.
+        //
+        // `LIMIT ALL` for the same reason one step further along: a conditional
+        // delete now has to state how much it may remove, and `ALL` is the way to
+        // say "however many match" without a number that would silently become
+        // wrong as the site grows.
         self.run(
-            "DELETE FROM holds WHERE true;\nDELETE FROM fragment WHERE true;\nDELETE FROM page WHERE true;\nDELETE FROM section WHERE true;\n",
+            "DELETE FROM holds WHERE true LIMIT ALL;\nDELETE FROM fragment WHERE true LIMIT ALL;\nDELETE FROM page WHERE true LIMIT ALL;\nDELETE FROM section WHERE true LIMIT ALL;\n",
         )
         .await?;
 

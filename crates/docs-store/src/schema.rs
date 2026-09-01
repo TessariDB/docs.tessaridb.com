@@ -66,9 +66,9 @@ USE DATABASE docs;
 
 DEFINE ANALYZER IF NOT EXISTS prose FILTERS lowercase, ascii;
 
-DEFINE TABLE IF NOT EXISTS section;
-DEFINE TABLE IF NOT EXISTS page;
-DEFINE TABLE IF NOT EXISTS fragment;
+DEFINE COLLECTION IF NOT EXISTS section;
+DEFINE COLLECTION IF NOT EXISTS page;
+DEFINE COLLECTION IF NOT EXISTS fragment;
 DEFINE TABLE IF NOT EXISTS holds EDGE;
 DEFINE BUCKET IF NOT EXISTS asset;
 
@@ -80,8 +80,8 @@ DEFINE BUCKET IF NOT EXISTS asset;
 -- `account.secret` is an Argon2id PHC string. `token`'s record id is the
 -- SHA-256 of the token that was handed out, so this table holds nothing that
 -- can be presented to anything: a dump of it is a list of expiry times.
-DEFINE TABLE IF NOT EXISTS account;
-DEFINE TABLE IF NOT EXISTS token;
+DEFINE COLLECTION IF NOT EXISTS account;
+DEFINE COLLECTION IF NOT EXISTS token;
 
 DEFINE FIELD IF NOT EXISTS text ON fragment TYPE string ANALYZER prose;
 DEFINE INDEX IF NOT EXISTS by_text ON fragment FIELDS text SEARCH;

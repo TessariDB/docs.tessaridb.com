@@ -101,7 +101,7 @@ impl Store {
     /// Drops the fragments of one page.
     async fn clear_fragments(&mut self, slug: &str) -> Result<(), Fault> {
         self.run_with(
-            "DELETE FROM fragment WHERE page = $page;",
+            "DELETE FROM fragment WHERE page = $page LIMIT ALL;",
             vec![("page".to_owned(), crate::text(slug))],
         )
         .await?;
@@ -122,7 +122,7 @@ impl Store {
     /// the page appears under both its old parent and its new one.
     async fn unlink(&mut self, slug: &str, table: &str) -> Result<(), Fault> {
         self.run_with(
-            "DELETE FROM holds WHERE child = $child;",
+            "DELETE FROM holds WHERE child = $child LIMIT ALL;",
             vec![("child".to_owned(), crate::text(&format!("{table}:{slug}")))],
         )
         .await?;
