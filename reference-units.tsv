@@ -55,6 +55,7 @@ function	rand::uuid
 function	search::score
 function	string::concat
 function	string::len
+function	string::lines
 function	string::lower
 function	string::replace
 function	string::slice
