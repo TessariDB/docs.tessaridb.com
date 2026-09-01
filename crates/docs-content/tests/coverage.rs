@@ -15,8 +15,33 @@
 //!     the_units_the_documentation_must_cover_can_be_printed -- --nocapture
 //! ```
 //!
-//! It is copied, never typed. The engine's suite fails first when the language
-//! grows, and its message says to regenerate this file.
+//! It is copied, never typed.
+//!
+//! # Nothing here checks that the copy is current
+//!
+//! This paragraph replaces one that said the engine's suite "fails first when
+//! the language grows, and its message says to regenerate this file". The first
+//! half is true of the engine's *own* reference, which is that suite's subject.
+//! It is not true of this copy, and the difference is the whole point.
+//!
+//! Measured on 2026-09-01: the copy was dated 29 August, the graph, vector and
+//! geo engines had shipped since, the manifest therefore listed none of
+//! `DEFINE GRAPH`, `DEFINE EDGE`, `DEFINE VECTOR` or `DEFINE GEO`, the site
+//! documented none of them — and every test in this file passed. A stale source
+//! set degrades the *question*, not the answer, so coverage does not weaken as
+//! the gap grows; it is reported more confidently, because everything still
+//! being asked about is genuinely covered.
+//!
+//! **This cannot be fixed from here.** Knowing "the engine grew and nobody
+//! re-copied" requires the engine's unit set, which is the exact dependency this
+//! repository exists to do without. A digest or row-count in the manifest would
+//! catch a truncated paste — a failure that has never happened — while leaving
+//! the one that did undetectable, so none is added: a guard named for a property
+//! it does not have is how the next reader stops looking.
+//!
+//! The only place that can catch it is the producing suite, which already holds
+//! the unit set. Recorded as Q-334 for the owner, because a cross-repository
+//! check has its own failure mode.
 //!
 //! # Where this actually runs
 //!
