@@ -24,6 +24,14 @@
 //! that to what the site is serving, so a reformatted paragraph that renders
 //! identically is not a change and a one-word edit is.
 //!
+//! A body is not all a reader sees. The comparison was the rendered HTML alone
+//! until it was caught missing a move: adding `section` to four pages changed
+//! where each one sits in the tree and changed not one word of prose, so the
+//! publish reported nothing to do and wrote nothing. Everything that *places or
+//! labels* a page — its title, its summary, its section, its unreleased notice
+//! — is compared alongside the body, and a changed page names which of them
+//! moved.
+//!
 //! # Removal is never a side effect of absence
 //!
 //! A page in the store and not on disk is *reported* and left alone. It is
@@ -47,13 +55,73 @@ use crate::corpus;
 /// read, and in the shell history afterwards.
 pub const PASSWORD: &str = "DOCS_PUBLISH_PASSWORD";
 
+/// A page as the site presents it — the body, and everything around the body.
+///
+/// The `section` half does not come from the same place as the rest: the page
+/// route answers what a page *is*, and the navigation tree answers where it
+/// *sits*. Both are needed to tell whether a publish would change anything, so
+/// both are gathered into one value before the comparison sees them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Shown {
+    /// The rendered body.
+    pub html: String,
+    /// The title, in the tree, the tab and every search result.
+    pub title: String,
+    /// The sentence under the title.
+    pub summary: Option<String>,
+    /// The section slug this page sits under; `None` at the root of the tree.
+    pub section: Option<String>,
+    /// Whether the page carries the not-yet-released notice.
+    pub unreleased: bool,
+}
+
+impl Shown {
+    /// Which fields differ, named, in a fixed order.
+    ///
+    /// Fixed order and `&'static str` so the printed line is stable between runs
+    /// and the comparison allocates nothing per page.
+    #[must_use]
+    pub fn differences(&self, other: &Self) -> Vec<&'static str> {
+        let mut moved = Vec::new();
+        if self.html != other.html {
+            moved.push("body");
+        }
+        if self.title != other.title {
+            moved.push("title");
+        }
+        if self.summary != other.summary {
+            moved.push("summary");
+        }
+        if self.section != other.section {
+            moved.push("section");
+        }
+        if self.unreleased != other.unreleased {
+            moved.push("unreleased");
+        }
+        moved
+    }
+}
+
+/// A page that differs, and in what.
+///
+/// The field names are the point. A publish that says only *"changed"* about a
+/// page whose body is untouched reads as a spurious rewrite, and the person
+/// running it has no way to tell a moved page from a re-worded one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    /// The page.
+    pub slug: String,
+    /// What differs about it.
+    pub fields: Vec<&'static str>,
+}
+
 /// What a publish would do, page by page.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     /// Pages the site does not have.
     pub added: Vec<String>,
-    /// Pages whose rendering would change.
-    pub changed: Vec<String>,
+    /// Pages that differ, and in which fields.
+    pub changed: Vec<Change>,
     /// Pages that are identical and will be skipped.
     pub unchanged: Vec<String>,
     /// Pages the site has and the corpus does not.
@@ -74,8 +142,12 @@ impl Plan {
         for slug in &self.added {
             said.push(format!("  new      /{slug}"));
         }
-        for slug in &self.changed {
-            said.push(format!("  changed  /{slug}"));
+        for change in &self.changed {
+            said.push(format!(
+                "  changed  /{}  ({})",
+                change.slug,
+                change.fields.join(", ")
+            ));
         }
         for slug in &self.absent {
             // Named either way. A page about to be deleted and a page about to
@@ -100,18 +172,27 @@ impl Plan {
 
 /// Compare what the corpus holds against what the site is serving.
 ///
-/// `local` maps a slug to the HTML that slug would render to; `remote` maps a
-/// slug to the HTML the site is serving for it. Taking both as already-rendered
-/// text is what makes this testable without a network: the interesting logic is
-/// the set arithmetic and it should not need a server to exercise.
+/// `local` maps a slug to what that page would be; `remote` maps a slug to what
+/// the site is presenting for it. Taking both as already-gathered values is what
+/// makes this testable without a network: the interesting logic is the set
+/// arithmetic and the field comparison, and neither should need a server.
 #[must_use]
-pub fn compare(local: &BTreeMap<String, String>, remote: &BTreeMap<String, String>) -> Plan {
+pub fn compare(local: &BTreeMap<String, Shown>, remote: &BTreeMap<String, Shown>) -> Plan {
     let mut plan = Plan::default();
-    for (slug, rendering) in local {
+    for (slug, page) in local {
         match remote.get(slug) {
             None => plan.added.push(slug.clone()),
-            Some(serving) if serving == rendering => plan.unchanged.push(slug.clone()),
-            Some(_) => plan.changed.push(slug.clone()),
+            Some(serving) => {
+                let fields = page.differences(serving);
+                if fields.is_empty() {
+                    plan.unchanged.push(slug.clone());
+                } else {
+                    plan.changed.push(Change {
+                        slug: slug.clone(),
+                        fields,
+                    });
+                }
+            }
         }
     }
     for slug in remote.keys() {
@@ -122,22 +203,33 @@ pub fn compare(local: &BTreeMap<String, String>, remote: &BTreeMap<String, Strin
     plan
 }
 
-/// The slugs a nav tree holds, flattened.
+/// The pages a nav tree holds, each with the section it sits under.
 ///
 /// Only the pages. A section is not a page and cannot be compared with one —
 /// they are separate routes on the API and separate rows in the store.
-pub fn pages_in(tree: &[Node]) -> Vec<String> {
+///
+/// The enclosing section is the whole reason the tree is walked rather than
+/// merely listed: no route answers a page's section, so where the tree puts it
+/// is the only statement the site makes about where it belongs.
+pub fn pages_in(tree: &[Node]) -> Vec<(String, Option<String>)> {
     let mut found = Vec::new();
-    gather(tree, &mut found);
+    gather(tree, None, &mut found);
     found
 }
 
-fn gather(nodes: &[Node], into: &mut Vec<String>) {
+fn gather(nodes: &[Node], within: Option<&str>, into: &mut Vec<(String, Option<String>)>) {
     for node in nodes {
         if node.kind == "page" {
-            into.push(node.slug.clone());
+            into.push((node.slug.clone(), within.map(str::to_owned)));
         }
-        gather(&node.children, into);
+        // A nested section becomes the enclosing one for everything beneath it,
+        // so a page reports its immediate parent rather than the outermost group.
+        let inside = if node.kind == "section" {
+            Some(node.slug.as_str())
+        } else {
+            within
+        };
+        gather(&node.children, inside, into);
     }
 }
 
@@ -159,9 +251,17 @@ pub struct Node {
 }
 
 /// A page as the site is serving it.
+///
+/// A subset of what the route answers — the outline is derived from the body
+/// and the slug is how the page was asked for, so neither can differ on its own.
 #[derive(Debug, Clone, serde::Deserialize)]
 struct Serving {
     html: String,
+    title: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    unreleased: bool,
 }
 
 /// What `PUT /api/section/{slug}` takes.
@@ -228,31 +328,48 @@ async fn run(
 ) -> Result<(), String> {
     let mut local = BTreeMap::new();
     for page in &corpus.pages {
-        local.insert(page.slug.clone(), docs_content::to_html(&page.markdown));
+        local.insert(
+            page.slug.clone(),
+            Shown {
+                html: docs_content::to_html(&page.markdown),
+                title: page.front.title.clone(),
+                summary: page.front.summary.clone(),
+                // Resolved from the directory the file was read from, so this is
+                // where the corpus says the page belongs.
+                section: page.front.section.clone(),
+                unreleased: page.front.unreleased,
+            },
+        );
     }
 
-    // Asked page by page rather than read out of the navigation tree. The tree
-    // holds what the tree *shows*, and the home page is not a link in its own
-    // navigation — deriving the remote set from it reported `/index` as new on
-    // every publish and rewrote it every time.
+    // The tree is read first because the page route does not answer a section
+    // and the tree is the only place the site says where a page sits.
+    let tree: Vec<Node> = fetch(client, &format!("{site}/api/nav")).await?;
+    let placed: BTreeMap<String, Option<String>> = pages_in(&tree).into_iter().collect();
+
+    // Pages are still asked for one at a time rather than read out of the tree.
+    // The tree holds what the tree *shows*, and the home page is not a link in
+    // its own navigation — deriving the remote set from it reported `/index` as
+    // new on every publish and rewrote it every time.
     let mut remote = BTreeMap::new();
     for slug in local.keys() {
         if let Ok(serving) = fetch::<Serving>(client, &format!("{site}/api/page/{slug}")).await {
-            remote.insert(slug.clone(), serving.html);
+            remote.insert(
+                slug.clone(),
+                showing(serving, placed.get(slug).cloned().flatten()),
+            );
         }
     }
-    // The tree is still what answers the other direction — a page the site has
-    // and the corpus does not, which by definition is not in `local` to ask
-    // about. A page in the tree that will not load is left out rather than
-    // crashing the publish: the tree and the pages are separate rows and one
-    // can outlive the other.
-    let tree: Vec<Node> = fetch(client, &format!("{site}/api/nav")).await?;
-    for slug in pages_in(&tree) {
+    // The tree answers the other direction — a page the site has and the corpus
+    // does not, which by definition is not in `local` to ask about. A page in
+    // the tree that will not load is left out rather than crashing the publish:
+    // the tree and the pages are separate rows and one can outlive the other.
+    for (slug, section) in pages_in(&tree) {
         if local.contains_key(&slug) || remote.contains_key(&slug) {
             continue;
         }
         if let Ok(serving) = fetch::<Serving>(client, &format!("{site}/api/page/{slug}")).await {
-            remote.insert(slug, serving.html);
+            remote.insert(slug, showing(serving, section));
         }
     }
 
@@ -276,7 +393,11 @@ async fn run(
     for section in &corpus.sections {
         put_section(client, site, token, section).await?;
     }
-    for slug in plan.added.iter().chain(plan.changed.iter()) {
+    for slug in plan
+        .added
+        .iter()
+        .chain(plan.changed.iter().map(|change| &change.slug))
+    {
         let source = std::fs::read_to_string(source_of(&asked.content, slug))
             .map_err(|fault| format!("/{slug}: {fault}"))?;
         put_page(client, site, token, slug, &source).await?;
@@ -290,6 +411,22 @@ async fn run(
     }
     println!("\ndone");
     Ok(())
+}
+
+/// What the site is presenting, from the page route plus the page's place in
+/// the navigation tree.
+///
+/// A page the tree does not show reads as sitting at the root — which is what
+/// the corpus says about the home page too, so the two agree rather than
+/// reporting a change on every publish.
+fn showing(serving: Serving, section: Option<String>) -> Shown {
+    Shown {
+        html: serving.html,
+        title: serving.title,
+        summary: serving.summary,
+        section,
+        unreleased: serving.unreleased,
+    }
 }
 
 /// The file a slug was read from.
@@ -437,13 +574,41 @@ async fn written(request: reqwest::RequestBuilder, what: &str) -> Result<(), Str
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{Node, compare, pages_in, source_of};
+    use super::{Node, Shown, compare, pages_in, source_of};
 
-    fn corpus(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+    /// A page with nothing remarkable about it, to vary one field at a time.
+    fn page(html: &str) -> Shown {
+        Shown {
+            html: html.to_owned(),
+            title: "A page".to_owned(),
+            summary: None,
+            section: None,
+            unreleased: false,
+        }
+    }
+
+    fn corpus(entries: &[(&str, &str)]) -> BTreeMap<String, Shown> {
         entries
             .iter()
-            .map(|(slug, html)| ((*slug).to_owned(), (*html).to_owned()))
+            .map(|(slug, html)| ((*slug).to_owned(), page(html)))
             .collect()
+    }
+
+    /// The corpus and the site agreeing about one page, ready to disagree about
+    /// exactly one field.
+    fn pair() -> (BTreeMap<String, Shown>, BTreeMap<String, Shown>) {
+        (
+            corpus(&[("a", "<p>one</p>")]),
+            corpus(&[("a", "<p>one</p>")]),
+        )
+    }
+
+    /// The fields a plan reports as changed for the one page in it.
+    fn moved(plan: &super::Plan) -> Vec<&'static str> {
+        plan.changed
+            .first()
+            .map(|change| change.fields.clone())
+            .unwrap_or_default()
     }
 
     #[test]
@@ -464,8 +629,59 @@ mod tests {
             &corpus(&[("a", "<p>one</p>")]),
             &corpus(&[("a", "<p>ONE</p>")]),
         );
-        assert_eq!(plan.changed, ["a"]);
+        assert_eq!(moved(&plan), ["body"]);
         assert!(plan.unchanged.is_empty());
+    }
+
+    // The four below are the defect this comparison was widened for: each moves
+    // one field that leaves the rendered body byte-identical, and each was
+    // reported `unchanged` — so the page was never rewritten and the site kept
+    // serving the old value with nothing saying so. One field per test, so a
+    // regression names which one came back.
+
+    #[test]
+    fn a_page_that_moved_section_is_a_change_even_though_it_reads_the_same() {
+        let (mut local, remote) = pair();
+        local.get_mut("a").expect("the page").section = Some("guides".to_owned());
+        let plan = compare(&local, &remote);
+        assert_eq!(moved(&plan), ["section"]);
+    }
+
+    #[test]
+    fn a_retitled_page_is_a_change() {
+        let (mut local, remote) = pair();
+        local.get_mut("a").expect("the page").title = "Another page".to_owned();
+        assert_eq!(moved(&compare(&local, &remote)), ["title"]);
+    }
+
+    #[test]
+    fn a_rewritten_summary_is_a_change() {
+        let (mut local, remote) = pair();
+        local.get_mut("a").expect("the page").summary = Some("what it is".to_owned());
+        assert_eq!(moved(&compare(&local, &remote)), ["summary"]);
+    }
+
+    #[test]
+    fn gaining_or_losing_the_unreleased_notice_is_a_change() {
+        let (mut local, remote) = pair();
+        local.get_mut("a").expect("the page").unreleased = true;
+        assert_eq!(moved(&compare(&local, &remote)), ["unreleased"]);
+    }
+
+    #[test]
+    fn a_changed_page_says_what_moved() {
+        // The half of the defect that is about the output rather than the
+        // comparison: "changed" alone reads as a spurious rewrite when the body
+        // is untouched, and gives the person running it nothing to check.
+        let (mut local, remote) = pair();
+        let page = local.get_mut("a").expect("the page");
+        page.section = Some("guides".to_owned());
+        page.title = "Another page".to_owned();
+        let printed = compare(&local, &remote).lines(false).join("\n");
+        assert!(
+            printed.contains("changed  /a  (title, section)"),
+            "{printed}"
+        );
     }
 
     #[test]
@@ -508,7 +724,47 @@ mod tests {
                 children: Vec::new(),
             }],
         }];
-        assert_eq!(pages_in(&tree), ["security/users"]);
+        assert_eq!(
+            pages_in(&tree),
+            [("security/users".to_owned(), Some("security".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn a_page_reports_the_section_it_is_immediately_inside_and_a_root_page_reports_none() {
+        // A nested section, because the useful answer is the page's own parent
+        // rather than the outermost group it happens to sit beneath — the tree
+        // is the only statement the site makes about where a page belongs.
+        let tree = vec![
+            Node {
+                slug: "index".to_owned(),
+                kind: "page".to_owned(),
+                children: Vec::new(),
+            },
+            Node {
+                slug: "query-language".to_owned(),
+                kind: "section".to_owned(),
+                children: vec![Node {
+                    slug: "query-language/reads".to_owned(),
+                    kind: "section".to_owned(),
+                    children: vec![Node {
+                        slug: "query-language/reads/select".to_owned(),
+                        kind: "page".to_owned(),
+                        children: Vec::new(),
+                    }],
+                }],
+            },
+        ];
+        assert_eq!(
+            pages_in(&tree),
+            [
+                ("index".to_owned(), None),
+                (
+                    "query-language/reads/select".to_owned(),
+                    Some("query-language/reads".to_owned())
+                ),
+            ]
+        );
     }
 
     #[test]
