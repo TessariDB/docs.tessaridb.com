@@ -105,6 +105,14 @@ services:
   #   docker compose -f deploy/compose.yaml --env-file deploy/.env \
   #     --profile init run --rm init
   #
+  # **Moving `DOCS_NAMESPACE` means renaming the two service users as well.**
+  # Their names are unique across the store and both statements below carry
+  # `IF NOT EXISTS`, so re-running this against a new namespace answers `ok` and
+  # leaves them scoped to the old one — after which the API is refused with
+  # *"… is outside this user's namespace and database"*. Name them after the
+  # namespace (`reader_v0_0_2`) and the previous namespace also stays servable,
+  # which is what makes pointing `DOCS_NAMESPACE` back an actual rollback.
+  #
   # It needs the owner declared by the `db` service above, and that owner has to
   # be **store-wide** — `DEFINE NAMESPACE` has no tenancy to check because its
   # subject is the store itself, so an owner scoped to one database is refused.
