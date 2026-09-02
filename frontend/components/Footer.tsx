@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Mark } from "@/components/icons";
+import { version } from "@/lib/site";
 
 /**
  * The bottom of every page.
@@ -90,7 +91,7 @@ export function Footer() {
 
       <div className="footer-legal">
         <p>
-          <strong>TessariDB 0.0.1-alpha</strong> &middot; &copy; 2026 boogvar
+          <strong>TessariDB {version}</strong> &middot; &copy; 2026 boogvar
         </p>
         <p>
           Business Source License 1.1. Free in production, including

@@ -10,7 +10,7 @@ import { Tree } from "@/components/Tree";
 import { BEFORE_PAINT, ThemeToggle } from "@/components/Theme";
 import { Mark, Search as SearchIcon } from "@/components/icons";
 import { type TreeNode, nav } from "@/lib/api";
-import { origin, tagline } from "@/lib/site";
+import { origin, tagline, version } from "@/lib/site";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -113,7 +113,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
                 The version sits with it: both answer "what am I reading". */}
             <span className="header-what">
               Docs
-              <small>0.0.1-alpha</small>
+              <small>{version}</small>
             </span>
             <div className="header-spacer" />
             <Search />
