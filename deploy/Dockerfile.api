@@ -14,27 +14,23 @@
 FROM rust:1.98-slim-bookworm AS build
 
 # `git` because the client SDK is a git dependency and cargo is told to fetch
-# with the CLI (see .cargo/config.toml); `openssh-client` because that
-# repository is private and the fetch is authenticated.
+# with the CLI (see .cargo/config.toml).
+#
+# There is no `openssh-client` and no forwarded agent any more. This build used
+# to install one, write a `known_hosts`, and rewrite every `https://github.com/`
+# URL to SSH, because `TessariDB-sdk-rust` was private and the fetch had to be
+# authenticated. That repository is public now — checked 2026-09-02, an
+# anonymous request answers 200 — so the lockfile's own HTTPS URL is fetched as
+# written, and a deploy needs no key at all.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
+ && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-
-# The lockfile pins the dependency by its HTTPS URL, and rewriting that URL in
-# `Cargo.toml` would change what `--locked` is checking against. So the URL
-# stays and the transport is swapped underneath it.
-RUN mkdir -p -m 0700 /root/.ssh \
- && ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null \
- && git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
 COPY crates ./crates
-# The agent is forwarded in for the duration of this one instruction. Nothing
-# is written to a layer, so the image carries no credential — which is the
-# whole reason this is a mount and not a build argument.
-RUN --mount=type=ssh cargo build --release --workspace --locked
+RUN cargo build --release --workspace --locked
 
 # ── run ─────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim

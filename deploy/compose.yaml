@@ -1,21 +1,30 @@
 # Three containers and one folder on the host.
 #
-#   docs-db    the database
+#   docs-db    the database — the published image, pulled, never built here
 #   docs-api   the site's API
 #   docs-web   the front end
 #
-# The database is separate from the API for two unrelated reasons. Failure: when
-# they shared a container a script supervised both, and either one exiting took
-# the other down, so an API crash stopped the database. Build: the database
-# image compiles a vendored RocksDB and takes forty minutes, while the API
-# changes far more often and now rebuilds in a couple of minutes.
+# The database is separate from the API because when they shared a container a
+# script supervised both, and either one exiting took the other down — so an API
+# crash stopped the database.
+#
+# It used to be built here too, from a `Dockerfile.db` that fetched the engine's
+# private repository over a forwarded SSH agent and compiled a vendored RocksDB,
+# which took forty minutes and needed a key. That is gone: the engine is
+# published as `tessaridb/tessaridb` and this file pulls it. A deploy no longer
+# needs access to the engine's source at all.
 #
 # The store's directory is bound to a folder on the host, so the content
 # survives the container — and so that a backup is a copy of a directory rather
 # than an operation somebody has to remember how to perform.
 #
 #   cp deploy/.env.example deploy/.env    # then set the three passwords
-#   docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env up -d
+#
+# On a **fresh** store, once, before the first `up` has anything to serve:
+#
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env \
+#     --profile init run --rm init
 #
 # The site is then on http://localhost:3000.
 
@@ -34,37 +43,39 @@ x-logging: &logging
 
 services:
   db:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.db
-      # The engine repository is private, so the build authenticates with the
-      # forwarded agent rather than with a token baked into a layer. Requires an
-      # agent holding a key GitHub accepts.
-      ssh:
-        - default
-      args:
-        # Which revision of the engine this image runs. A commit here rather
-        # than a branch is what makes rebuilding an old image give back the old
-        # engine; a branch gives whatever it pointed at on the day of the build.
-        # It doubles as the cache key for the fetch-and-compile layer, so moving
-        # it is also how a rebuild is made to actually fetch the engine again.
-        TESSARIDB_REF: ${TESSARIDB_REF:-135495e5180f90d74556de2717506f7ba6b69d85}
+    # Pinned to a version, deliberately not `latest`.
+    #
+    # The on-disk format is not promised across alpha versions, and `latest`
+    # moves. A container that quietly picked up a newer engine on an unattended
+    # restart is how a store stops opening at three in the morning, for a reason
+    # nobody changed anything to cause. Moving this line is how the engine
+    # under this store is upgraded, and it should be a decision with a backup
+    # taken before it.
+    #
+    # Verified against this store on 2026-09-02 before the switch: the 0.0.2-alpha
+    # engine opened the 0.0.1-alpha store, and all 44 page bodies came back
+    # byte-for-byte identical through the unchanged API.
+    image: tessaridb/tessaridb:0.0.2-alpha
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
-      # Every interface, because the API is now in a different container. That
-      # is the one thing this split widens: the wire protocol carries no TLS, so
+      # Every interface, because the API is in a different container. That is
+      # the one thing this split widens: the wire protocol carries no TLS, so
       # the network it is on is declared `internal` below.
       TESSARIDB_ADDRESS: 0.0.0.0:7654
-      DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_1_alpha}
-      # The accounts are declared here, by the container that owns the store —
-      # which is also what lets the API image drop the engine binary entirely.
-      DOCS_OWNER_USER: ${DOCS_OWNER_USER:-owner}
-      DOCS_OWNER_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
-      DOCS_READER_USER: ${DOCS_READER_USER:-reader}
-      DOCS_READER_PASSWORD: ${DOCS_READER_PASSWORD:?set it in deploy/.env}
-      DOCS_EDITOR_USER: ${DOCS_EDITOR_USER:-editor}
-      DOCS_EDITOR_PASSWORD: ${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}
-      RUST_LOG: ${RUST_LOG:-info}
+      # HTTP on the internal network and nowhere else. It exists so the image's
+      # own health check can ask the node `/health` — which the node answers
+      # from the store — rather than ask the kernel whether a port is open. No
+      # `ports` entry below publishes it.
+      TESSARIDB_HTTP_ADDRESS: 0.0.0.0:8000
+      # Declares the first user on a **fresh** store and closes it, once. On a
+      # store that already has users the node says so and changes nothing, so
+      # this can sit here on every restart forever. It is not a password reset.
+      #
+      # The user it declares is store-wide, which is what the `init` service
+      # below then needs in order to declare a namespace.
+      TESSARIDB_INITIAL_USER: ${DOCS_OWNER_USER:-owner}
+      TESSARIDB_INITIAL_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
+      TESSARIDB_LOG: ${RUST_LOG:-info}
     volumes:
       # The host folder. Everything the site is lives here. Its ownership must
       # be the image's uid 10001: a bind mount presents the host's ownership and
@@ -79,13 +90,62 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # ── the fresh-store bootstrap, which is not part of `up` ───────────────────
+  #
+  # The same image, run as a client rather than as a node — one binary, so the
+  # thing that serves the store is the thing that talks to it. It declares the
+  # namespace, the database and the two service accounts, and says nothing the
+  # second time.
+  #
+  # Behind a profile on purpose, so a routine `up` never runs it. It has to
+  # succeed exactly once, on a store that has just been created, and a service
+  # that must not fail is a poor thing to put in the restart path of a site that
+  # is already serving. Run it by hand:
+  #
+  #   docker compose -f deploy/compose.yaml --env-file deploy/.env \
+  #     --profile init run --rm init
+  #
+  # It needs the owner declared by the `db` service above, and that owner has to
+  # be **store-wide** — `DEFINE NAMESPACE` has no tenancy to check because its
+  # subject is the store itself, so an owner scoped to one database is refused.
+  # `TESSARIDB_INITIAL_USER` declares a store-wide one; a store bootstrapped by
+  # the older `start-db.sh` may not have, and this will say so rather than
+  # pretend.
+  init:
+    profiles: ["init"]
+    image: tessaridb/tessaridb:0.0.2-alpha
+    environment:
+      TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
+    command:
+      - --at
+      - db:7654
+      - --user
+      - ${DOCS_OWNER_USER:-owner}
+      - -e
+      - |
+        DEFINE NAMESPACE IF NOT EXISTS ${DOCS_NAMESPACE:-v0_0_1_alpha};
+        USE NAMESPACE ${DOCS_NAMESPACE:-v0_0_1_alpha};
+        DEFINE DATABASE IF NOT EXISTS docs;
+        USE DATABASE docs;
+        DEFINE USER IF NOT EXISTS ${DOCS_READER_USER:-reader} ON ${DOCS_NAMESPACE:-v0_0_1_alpha}.docs ROLE viewer PASSWORD '${DOCS_READER_PASSWORD:?set it in deploy/.env}';
+        DEFINE USER IF NOT EXISTS ${DOCS_EDITOR_USER:-editor} ON ${DOCS_NAMESPACE:-v0_0_1_alpha}.docs ROLE editor PASSWORD '${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}';
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - store
+    restart: "no"
+    logging: *logging
+
   api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.api
-      # The client SDK is a private repository; same reason as above.
-      ssh:
-        - default
+      # No `ssh:` any more. The one git dependency is `tessaridb-client`, whose
+      # repository is public (checked 2026-09-02: an anonymous fetch answers
+      # 200), so the build clones it over HTTPS and needs no key. It used to
+      # forward an agent because that repository was private and because the
+      # build rewrote every GitHub URL to SSH; both are gone.
     ports:
       # Loopback only, and for the same reason the front end binds loopback: the
       # public edge is the TLS terminator on the host, and this is what it
