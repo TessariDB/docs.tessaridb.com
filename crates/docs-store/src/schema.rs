@@ -13,6 +13,23 @@
 //! ordering produces a ranking whose numbers do not mean what they appear to.
 //! `docs-content` composes the page title and the heading into `text` for
 //! exactly this reason, so one index ranks title hits and body hits together.
+//!
+//! # Why the analyzer is named after a language and cannot be edited in place
+//!
+//! An analyzer's **name is unique across the store**, not per database — it
+//! describes a language rather than a tenant's data. Two consequences, and both
+//! decide the shape of this file rather than merely decorating it.
+//!
+//! Adding a filter to an analyzer that is already declared does nothing:
+//! `IF NOT EXISTS` finds the name and returns, so the definition in force is
+//! still the old one and every read looks exactly as it did. And redefining one
+//! in place would leave the postings already written describing text that
+//! tokenises differently today — an index that quietly stops matching.
+//!
+//! So a change to the filter chain is a **new analyzer name in a new
+//! namespace**, which is the same mechanism a released version already uses.
+//! The name says what the chain does: `english` stems, and stemming is
+//! English-only here.
 
 /// A record id is spelled into a statement rather than bound, so the characters
 /// allowed in a slug are fixed here and checked before anything is written.
@@ -64,7 +81,12 @@ pub fn statements(namespace: &str) -> String {
 DEFINE DATABASE IF NOT EXISTS docs;
 USE DATABASE docs;
 
-DEFINE ANALYZER IF NOT EXISTS prose FILTERS lowercase, ascii;
+-- `lowercase` and `ascii` make two spellings of a word one term. `stemmer` is
+-- the one that makes two *words* one term, and without it a reader searching
+-- `backups` was told this site has nothing about backups. It is written last
+-- because Porter2 is defined over lower-case words and declines to half-stem
+-- anything else.
+DEFINE ANALYZER IF NOT EXISTS english FILTERS lowercase, ascii, stemmer;
 
 DEFINE COLLECTION IF NOT EXISTS section;
 DEFINE COLLECTION IF NOT EXISTS page;
@@ -83,7 +105,7 @@ DEFINE BUCKET IF NOT EXISTS asset;
 DEFINE COLLECTION IF NOT EXISTS account;
 DEFINE COLLECTION IF NOT EXISTS token;
 
-DEFINE FIELD IF NOT EXISTS text ON fragment TYPE string ANALYZER prose;
+DEFINE FIELD IF NOT EXISTS text ON fragment TYPE string ANALYZER english;
 DEFINE INDEX IF NOT EXISTS by_text ON fragment FIELDS text SEARCH;
 "
     )
@@ -118,7 +140,7 @@ mod tests {
 
     #[test]
     fn every_definition_is_re_runnable_so_a_restart_is_not_a_special_case() {
-        let script = statements("v0_0_1_alpha");
+        let script = statements("v0_0_2_alpha");
         for line in script.lines() {
             let line = line.trim();
             if line.starts_with("DEFINE") {
@@ -136,8 +158,9 @@ mod tests {
         // route says it means. Cheaper to assert than to notice in production.
         let script = statements("v1");
         assert!(
-            script
-                .contains("DEFINE FIELD IF NOT EXISTS text ON fragment TYPE string ANALYZER prose")
+            script.contains(
+                "DEFINE FIELD IF NOT EXISTS text ON fragment TYPE string ANALYZER english"
+            )
         );
         assert!(
             script.contains("DEFINE INDEX IF NOT EXISTS by_text ON fragment FIELDS text SEARCH")
@@ -158,6 +181,38 @@ mod tests {
         assert_eq!(searched.len(), 1, "{searched:?}");
         assert!(analyzed[0].contains("text ON fragment"));
         assert!(searched[0].contains("ON fragment FIELDS text"));
+    }
+
+    #[test]
+    fn the_field_names_an_analyzer_this_script_declares_and_it_stems() {
+        // The failure this asserts against shipped: the chain was
+        // `lowercase, ascii`, so `backups` found nothing while `backup` found
+        // twenty pages — no error, no empty index, just a smaller answer than
+        // the one asked for. And because an analyzer's name is unique across the
+        // store, a field pointing at a name declared under some *other*
+        // namespace's chain would look identical to this one from here.
+        let script = statements("v1");
+        let declared: Vec<&str> = script
+            .lines()
+            .filter(|line| line.starts_with("DEFINE ANALYZER"))
+            .collect();
+        assert_eq!(declared.len(), 1, "{declared:?}");
+        let name = declared[0]
+            .split_whitespace()
+            .nth(5)
+            .expect("DEFINE ANALYZER IF NOT EXISTS <name> FILTERS …");
+        assert!(
+            script.contains(&format!("ON fragment TYPE string ANALYZER {name};")),
+            "the analyzed field names something other than {name}"
+        );
+        assert!(declared[0].contains("stemmer"), "{}", declared[0]);
+        // `lowercase` before `stemmer`, or Porter2 returns the word untouched
+        // rather than stemming it — a chain that reads right and does nothing.
+        let chain = declared[0]
+            .split_once("FILTERS ")
+            .expect("a filter chain")
+            .1;
+        assert!(chain.find("lowercase") < chain.find("stemmer"), "{chain}");
     }
 
     #[test]
