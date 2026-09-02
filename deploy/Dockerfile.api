@@ -26,6 +26,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# Git's protocol v2 does not complete against GitHub from this host's network:
+# the fetch comes back asking for a username, on a repository that is public and
+# whose `info/refs?service=git-upload-pack` answers `200` to an anonymous
+# `curl` from the same machine. Forcing v1 fixes it, measured 2026-09-02 both
+# here and on the host's own `git pull`.
+#
+# This is worth naming because the failure it produces —
+# `could not read Username for 'https://github.com'` — reads exactly like a
+# private repository refusing an anonymous fetch, and that is what the previous
+# version of this file concluded: it installed `openssh-client`, forwarded an
+# agent and rewrote every GitHub URL to SSH. The repository was never the
+# problem.
+RUN git config --global protocol.version 1
+
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo ./.cargo
