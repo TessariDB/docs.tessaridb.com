@@ -814,3 +814,29 @@ async fn the_word_being_typed_is_answered_off_the_index_and_not_off_a_scan() {
         "the word being typed is still walking the collection"
     );
 }
+
+#[tokio::test]
+async fn a_corrected_word_is_ranked_and_not_merely_returned() {
+    let Some((mut store, _alone)) = store("t_fuzzy_rank").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // The defect this exists for shipped for about an hour. The fuzzy pass
+    // found the right fragments and returned them in the store's own order,
+    // unscored — so `analyzor` answered with the pages that merely mention
+    // analyzers, and the page the word is about was eleventh. Non-empty is not
+    // the same as useful, and the assertion that catches the difference is on
+    // the ORDER, not on the count.
+    let hits = store.search("analyzor", 10).await.expect("a search");
+    let first = hits.first().expect("a misspelled word found nothing");
+    assert_eq!(
+        first.heading, "Analyzers",
+        "the corrected word was not re-ranked, so the order is the store's: {hits:?}"
+    );
+    assert!(
+        first.relevance > 0.0,
+        "the leading hit is unscored, so it came from the raw fuzzy pass: {first:?}"
+    );
+}

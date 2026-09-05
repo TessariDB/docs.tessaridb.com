@@ -271,8 +271,22 @@ impl Store {
         }
 
         if hits.len() < room {
-            for hit in self.corrected(query, limit).await? {
-                push(&mut hits, hit, room);
+            let found = self.corrected(query, limit).await?;
+
+            // Same shape as the prefix pass, and for the same reason. The fuzzy
+            // pass says which fragments hold a word close to the one typed; the
+            // words in those fragments say which word that was; and asking the
+            // index for *that* produces the ordering the fuzzy pass cannot,
+            // because `search::score` scores the string it is handed and
+            // `vecter` is not a term the collection holds.
+            if let Some(repaired) = repair(&found, query) {
+                for hit in self.ranked(&repaired, limit).await? {
+                    push(&mut hits, hit, room);
+                }
+            }
+
+            for hit in found {
+                push(&mut hits, hit.hit, room);
             }
         }
         Ok(hits)
@@ -395,12 +409,12 @@ impl Store {
     ///
     /// This is what answers `vecter`, which the prefix pass cannot: a misspelled
     /// word is not a prefix of the right one.
-    async fn corrected(&mut self, query: &str, limit: u32) -> Result<Vec<Hit>, Fault> {
+    async fn corrected(&mut self, query: &str, limit: u32) -> Result<Vec<Found>, Fault> {
         if !query.split_whitespace().all(long_enough) {
             return Ok(Vec::new());
         }
         let script = format!(
-            "SELECT page, heading, anchor, body
+            "SELECT page, heading, anchor, body, text
              FROM fragment
              WHERE text MATCHES FUZZY $q
              LIMIT {limit};"
@@ -414,8 +428,117 @@ impl Store {
                 )],
             )
             .await?;
-        hits_of(answers.first())
+        Ok(records(answers.first())?
+            .iter()
+            .map(|(_, value)| Found {
+                hit: hit_of(value),
+                text: text_of(value, "text"),
+            })
+            .collect())
     }
+}
+
+/// The query with each misspelled word replaced by the word it meant, or `None`
+/// when nothing needed replacing.
+///
+/// `None` matters as much as `Some`: it says the words were already the corpus's
+/// own, so the ranked pass has asked the index for exactly this query and come
+/// back short. Re-ranking it would be a second round trip for the same answer.
+///
+/// A word is left alone when the fragments hold it verbatim, so a query that is
+/// half right — `vecter distance` — keeps the half that was.
+fn repair(found: &[Found], query: &str) -> Option<String> {
+    let mut repaired = Vec::new();
+    let mut changed = false;
+    for word in query.split_whitespace() {
+        let typed = word.to_lowercase();
+        if found.iter().any(|held| holds_word(&held.text, &typed)) {
+            repaired.push(typed);
+            continue;
+        }
+        match correction(found, &typed) {
+            Some(fixed) => {
+                repaired.push(fixed);
+                changed = true;
+            }
+            None => repaired.push(typed),
+        }
+    }
+    changed.then(|| repaired.join(" "))
+}
+
+/// Whether the text holds this exact word, split the way the analyzer splits.
+fn holds_word(text: &str, word: &str) -> bool {
+    text.split(|character: char| !character.is_alphanumeric())
+        .any(|held| held.eq_ignore_ascii_case(word))
+}
+
+/// The word in these fragments that the typed one was most likely a misspelling
+/// of.
+///
+/// The rule is the store's own, deliberately: at most two edits, with the first
+/// three characters held exact. Choosing by a looser rule than the one the index
+/// matched by would pick a word the fuzzy pass never used, and the re-ranked
+/// results would then disagree with the unscored ones below them.
+///
+/// Ties break on the commoner word, then the shorter, then alphabetically — so
+/// the same corpus and the same typo always choose the same word, and the page
+/// does not reorder itself when a reader retypes.
+fn correction(found: &[Found], typed: &str) -> Option<String> {
+    let mut counted: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for held in found {
+        for word in held
+            .text
+            .split(|character: char| !character.is_alphanumeric())
+        {
+            let word = word.to_lowercase();
+            if word.len() >= 3 && within_two_edits(&word, typed) {
+                let seen = counted.entry(word).or_default();
+                *seen = seen.saturating_add(1);
+            }
+        }
+    }
+    counted
+        .into_iter()
+        .max_by(|(left, left_count), (right, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| right.len().cmp(&left.len()))
+                .then_with(|| right.cmp(left))
+        })
+        .map(|(word, _)| word)
+}
+
+/// Whether two words are within two edits of each other, with the first three
+/// characters equal.
+///
+/// The prefix condition is not an optimisation — it is half of what the store's
+/// `FUZZY` operator *means*, so applying it here keeps this code's idea of a
+/// correction the same as the index's.
+fn within_two_edits(candidate: &str, typed: &str) -> bool {
+    let candidate: Vec<char> = candidate.chars().collect();
+    let typed: Vec<char> = typed.chars().collect();
+    if candidate.len() < 3 || typed.len() < 3 || candidate[..3] != typed[..3] {
+        return false;
+    }
+    if candidate.len().abs_diff(typed.len()) > 2 {
+        return false;
+    }
+    // Full Levenshtein over two short words. The rows are the previous and
+    // current ones only, because nothing here needs the alignment itself.
+    let mut previous: Vec<usize> = (0..=typed.len()).collect();
+    let mut current = vec![0_usize; typed.len().saturating_add(1)];
+    for (row, left) in candidate.iter().enumerate() {
+        current[0] = row.saturating_add(1);
+        for (column, right) in typed.iter().enumerate() {
+            let substitution = previous[column].saturating_add(usize::from(left != right));
+            let deletion = previous[column.saturating_add(1)].saturating_add(1);
+            let insertion = current[column].saturating_add(1);
+            current[column.saturating_add(1)] = substitution.min(deletion).min(insertion);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[typed.len()] <= 2
 }
 
 /// Whether a word clears the store's three-character floor for `PREFIX` and
@@ -558,7 +681,10 @@ mod tests {
 
     use tessaridb_client::{Number, Value};
 
-    use super::{Found, Hit, completion, long_enough, non_empty, relevance_of, split_last_word};
+    use super::{
+        Found, Hit, completion, long_enough, non_empty, relevance_of, repair, split_last_word,
+        within_two_edits,
+    };
 
     fn prefixed(texts: &[&str]) -> Vec<Found> {
         texts
@@ -631,6 +757,49 @@ mod tests {
         // the failure would look like an error on one language only.
         assert!(long_enough("длин"));
         assert!(!long_enough("до"));
+    }
+
+    #[test]
+    fn a_correction_keeps_the_stores_own_rule_for_what_counts_as_close() {
+        // The first three characters are exact and at most two edits follow.
+        // That is the store's `FUZZY` rule, and matching it here is what keeps
+        // the word this code re-ranks by the same word the index matched.
+        assert!(within_two_edits("vector", "vecter"));
+        assert!(within_two_edits("vector", "vectr"));
+        assert!(within_two_edits("analyzer", "analyzor"));
+        // Three edits is too far.
+        assert!(!within_two_edits("vector", "vecccc"));
+        // Close, but the first three characters differ — the index would never
+        // have matched it, so neither does this.
+        assert!(!within_two_edits("sector", "vecter"));
+        // Too short to be a term at all.
+        assert!(!within_two_edits("ab", "ab"));
+    }
+
+    #[test]
+    fn a_query_whose_words_the_corpus_already_holds_is_not_repaired() {
+        // `None` is the load-bearing answer: the ranked pass has already asked
+        // the index for exactly these words and come back short, so re-ranking
+        // them is a second round trip for the same answer.
+        let found = prefixed(&["vector and distance functions"]);
+        assert_eq!(repair(&found, "vector distance"), None);
+    }
+
+    #[test]
+    fn only_the_misspelled_half_of_a_query_is_replaced() {
+        // A reader who mistypes one word of two should not have the word they
+        // got right thrown away and guessed at again.
+        let found = prefixed(&["vector and distance functions"]);
+        assert_eq!(
+            repair(&found, "vecter distance"),
+            Some("vector distance".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_typo_with_no_close_word_leaves_the_query_alone() {
+        let found = prefixed(&["vector and distance functions"]);
+        assert_eq!(repair(&found, "zzzqqq"), None);
     }
 
     #[test]
