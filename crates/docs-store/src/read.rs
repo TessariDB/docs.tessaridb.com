@@ -829,8 +829,10 @@ mod tests {
 
     #[test]
     fn a_query_with_no_word_in_it_yields_no_partial_pass() {
-        // The property the pattern's safety rests on: what comes back is made of
-        // letters and digits, so `%` and `_` cannot reach `ILIKE` as wildcards.
+        // What comes back is made of letters and digits. That mattered most when
+        // the partial pass was an `ILIKE`, where `%` and `_` would have been
+        // wildcards; it still matters, because the term now goes to `PREFIX`
+        // and a query is only ever a bound value if nothing in it is syntax.
         assert_eq!(split_last_word("%"), None);
         assert_eq!(split_last_word("%_%"), None);
         assert_eq!(split_last_word("   "), None);
