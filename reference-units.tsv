@@ -52,6 +52,7 @@ function	object::keys
 function	object::len
 function	object::values
 function	rand::uuid
+function	search::highlight
 function	search::score
 function	string::concat
 function	string::len

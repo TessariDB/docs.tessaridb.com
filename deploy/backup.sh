@@ -26,7 +26,7 @@
 #
 #   docker compose ... stop db
 #   docker run --rm --user 0:0 -v "$STORE:/store" -v "$INTO:/out" \
-#     tessaridb/tessaridb:0.0.2-alpha /store/store --backup /out/manual.tessalog
+#     tessaridb/tessaridb:0.0.3-alpha /store/store --backup /out/manual.tessalog
 #   docker compose ... start db
 #
 # Two halves in two places, and not by preference: `xxd` is not in the database
@@ -43,7 +43,7 @@ KEEP="${DOCS_BACKUP_KEEP:-14}"
 # A different one here would read the store with an engine the deployment has
 # never used, which is the one moment you would not want to discover a format
 # difference.
-IMAGE="${DOCS_DB_IMAGE:-tessaridb/tessaridb:0.0.2-alpha}"
+IMAGE="${DOCS_DB_IMAGE:-tessaridb/tessaridb:0.0.3-alpha}"
 
 log() { printf 'backup: %s\n' "$*" >&2; }
 

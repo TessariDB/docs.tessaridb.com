@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.3-alpha"
 edition = "2024"
 rust-version = "1.98"
 license = "Apache-2.0"
@@ -12,9 +12,9 @@ repository = "https://github.com/TessariDB/docs.tessaridb.com"
 publish = false
 
 [workspace.dependencies]
-docs-content = { path = "crates/docs-content", version = "0.1.0" }
-docs-store = { path = "crates/docs-store", version = "0.1.0" }
-docs-server = { path = "crates/docs-server", version = "0.1.0" }
+docs-content = { path = "crates/docs-content", version = "0.0.3-alpha" }
+docs-store = { path = "crates/docs-store", version = "0.0.3-alpha" }
+docs-server = { path = "crates/docs-server", version = "0.0.3-alpha" }
 
 # The database is reached as any other caller reaches it: over the wire, through
 # the published client. A path or a git reference to the engine repository would

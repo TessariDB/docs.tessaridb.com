@@ -1,6 +1,6 @@
 {
   "name": "docs-web",
-  "version": "0.1.0",
+  "version": "0.0.3-alpha",
   "private": true,
   "description": "The front end for docs.tessaridb.com. Holds no content: every page is a read from the API, which is a read from TessariDB.",
   "scripts": {

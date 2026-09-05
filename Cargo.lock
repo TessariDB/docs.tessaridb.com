@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "docs-cli"
-version = "0.1.0"
+version = "0.0.3-alpha"
 dependencies = [
  "axum",
  "docs-content",
@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "docs-content"
-version = "0.1.0"
+version = "0.0.3-alpha"
 dependencies = [
  "pulldown-cmark",
  "serde",
@@ -333,7 +333,7 @@ dependencies = [
 
 [[package]]
 name = "docs-server"
-version = "0.1.0"
+version = "0.0.3-alpha"
 dependencies = [
  "argon2",
  "axum",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "docs-store"
-version = "0.1.0"
+version = "0.0.3-alpha"
 dependencies = [
  "docs-content",
  "log",
