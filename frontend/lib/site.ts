@@ -26,7 +26,7 @@ export const product = "https://tessaridb.com";
  * and where it drifted: both said `0.0.1-alpha` for a week after the engine had
  * moved on, and neither is a place anybody looks when the version changes.
  *
- * It is **not** derived from `DOCS_NAMESPACE`. That value — `v0_0_2_alpha` —
+ * It is **not** derived from `DOCS_NAMESPACE`. That value — `v0_0_3_alpha` —
  * looks like this one and is not: it names the store's namespace, so changing it
  * moves the site's content to a new namespace rather than relabelling anything.
  */

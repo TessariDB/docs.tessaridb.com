@@ -80,7 +80,7 @@ so a populated store is the answer and is never rebuilt from disk unless asked.
 Options
   --content <dir>    where the Markdown lives          (default: content)
   --at <host:port>   the node's wire address           (default: 127.0.0.1:7654)
-  --namespace <ns>   the documentation version         (default: v0_0_2_alpha)
+  --namespace <ns>   the documentation version         (default: v0_0_3_alpha)
   --bind <host:port> where the API listens, serve only (default: 127.0.0.1:8080)
   --ingest           serve: replace what the store holds first. Destructive.
   --to <url>         publish: the site to write to, e.g. https://docs.example
@@ -156,7 +156,7 @@ pub fn read(words: &[String], environment: &dyn Fn(&str) -> Option<String>) -> R
         task,
         content: PathBuf::from(setting(environment, CONTENT, "content")),
         node: setting(environment, NODE, "127.0.0.1:7654"),
-        namespace: setting(environment, NAMESPACE, "v0_0_2_alpha"),
+        namespace: setting(environment, NAMESPACE, "v0_0_3_alpha"),
         bind: setting(environment, BIND, "127.0.0.1:8080"),
         ingest_first: false,
         site: setting(environment, SITE, ""),
@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(held.task, Task::Serve);
         assert_eq!(held.content, PathBuf::from("content"));
         assert_eq!(held.node, "127.0.0.1:7654");
-        assert_eq!(held.namespace, "v0_0_2_alpha");
+        assert_eq!(held.namespace, "v0_0_3_alpha");
         assert_eq!(held.bind, "127.0.0.1:8080");
         assert!(!held.ingest_first);
     }
