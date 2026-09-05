@@ -55,7 +55,16 @@ services:
     # Verified against this store on 2026-09-02 before the switch: the 0.0.2-alpha
     # engine opened the 0.0.1-alpha store, and all 44 page bodies came back
     # byte-for-byte identical through the unchanged API.
-    image: tessaridb/tessaridb:0.0.3-alpha
+    #
+    # **This deliberately lags the released engine.** 0.0.3-alpha is published and
+    # is what the documentation tells a reader to install; this store stays on
+    # 0.0.2-alpha by decision of 2026-09-05, because 0.0.3-alpha changed the
+    # search index format and moving a running store across it is a migration
+    # rather than a pin bump. Do not "catch this up" — the lag is the decision.
+    # Taking it means: back up, rename the two service users in the host `.env`
+    # after the new namespace, `up -d db`, run the `init` profile, publish, then
+    # verify with `INFO FOR USER` rather than trusting `init`'s `ok`.
+    image: tessaridb/tessaridb:0.0.2-alpha
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is in a different container. That is
@@ -121,7 +130,7 @@ services:
   # pretend.
   init:
     profiles: ["init"]
-    image: tessaridb/tessaridb:0.0.3-alpha
+    image: tessaridb/tessaridb:0.0.2-alpha
     environment:
       TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
     command:
@@ -131,12 +140,12 @@ services:
       - ${DOCS_OWNER_USER:-owner}
       - -e
       - |
-        DEFINE NAMESPACE IF NOT EXISTS ${DOCS_NAMESPACE:-v0_0_3_alpha};
-        USE NAMESPACE ${DOCS_NAMESPACE:-v0_0_3_alpha};
+        DEFINE NAMESPACE IF NOT EXISTS ${DOCS_NAMESPACE:-v0_0_2_alpha};
+        USE NAMESPACE ${DOCS_NAMESPACE:-v0_0_2_alpha};
         DEFINE DATABASE IF NOT EXISTS docs;
         USE DATABASE docs;
-        DEFINE USER IF NOT EXISTS ${DOCS_READER_USER:-reader} ON ${DOCS_NAMESPACE:-v0_0_3_alpha}.docs ROLE viewer PASSWORD '${DOCS_READER_PASSWORD:?set it in deploy/.env}';
-        DEFINE USER IF NOT EXISTS ${DOCS_EDITOR_USER:-editor} ON ${DOCS_NAMESPACE:-v0_0_3_alpha}.docs ROLE editor PASSWORD '${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}';
+        DEFINE USER IF NOT EXISTS ${DOCS_READER_USER:-reader} ON ${DOCS_NAMESPACE:-v0_0_2_alpha}.docs ROLE viewer PASSWORD '${DOCS_READER_PASSWORD:?set it in deploy/.env}';
+        DEFINE USER IF NOT EXISTS ${DOCS_EDITOR_USER:-editor} ON ${DOCS_NAMESPACE:-v0_0_2_alpha}.docs ROLE editor PASSWORD '${DOCS_EDITOR_PASSWORD:?set it in deploy/.env}';
     depends_on:
       db:
         condition: service_healthy
@@ -169,7 +178,7 @@ services:
       # The service name, not loopback: the database is a different container.
       TESSARIDB_ADDRESS: db:7654
       DOCS_BIND: 0.0.0.0:8080
-      DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_3_alpha}
+      DOCS_NAMESPACE: ${DOCS_NAMESPACE:-v0_0_2_alpha}
       # Two identities, and the difference is the point. Writes run as the
       # editor; public reads run as the reader, which is a `viewer`, so a write
       # attempted on the read path is refused by the store rather than by this

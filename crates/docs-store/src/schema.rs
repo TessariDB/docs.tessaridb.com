@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn every_definition_is_re_runnable_so_a_restart_is_not_a_special_case() {
-        let script = statements("v0_0_3_alpha");
+        let script = statements("v0_0_2_alpha");
         for line in script.lines() {
             let line = line.trim();
             if line.starts_with("DEFINE") {
