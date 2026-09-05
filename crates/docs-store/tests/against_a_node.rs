@@ -721,3 +721,96 @@ async fn a_wildcard_a_reader_types_is_not_a_wildcard() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_misspelled_word_is_answered_by_the_word_it_meant() {
+    let Some((mut store, _alone)) = store("t_fuzzy").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // The hole this closes was live on the site: `analyzer` returned pages and
+    // `analyzor` returned `[]`, which reads as "this site has nothing about
+    // analyzers" rather than as "check the spelling". Neither of the first two
+    // passes can reach it — a misspelling is not a word the index holds, and it
+    // is not a prefix of the right one either.
+    let hits = store.search("analyzor", 10).await.expect("a search");
+    assert!(
+        hits.iter().any(|hit| hit.heading == "Analyzers"),
+        "a word within one edit found nothing: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_correction_never_outranks_a_word_the_reader_actually_typed() {
+    let Some((mut store, _alone)) = store("t_fuzzy_order").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // The precedence that makes the fuzzy pass safe to have at all. `ranking` is
+    // a word this corpus holds, so it must lead; the fuzzy pass runs anyway
+    // (the page is not full) and whatever it adds must arrive below. A guess at
+    // a misspelling displacing an exact hit would make every good query worse
+    // in exchange for rescuing a bad one.
+    let hits = store.search("ranking", 10).await.expect("a search");
+    let first = hits.first().expect("a whole word found nothing");
+    assert_eq!(first.heading, "Ranking", "{hits:?}");
+    assert!(
+        first.relevance > 0.0,
+        "the exact hit lost its score: {first:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stub_below_the_floor_is_dropped_rather_than_refused() {
+    let Some((mut store, _alone)) = store("t_floor_refusal").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // `PREFIX` and `FUZZY` refuse a term under three characters, and they refuse
+    // it per word — so `analyzer se`, sent whole, is an error for the whole
+    // query because of `se`. A reader typing the next word must not be shown a
+    // refusal, so the stub is dropped and the finished words are ranked alone.
+    let hits = store
+        .search("analyzer se", 10)
+        .await
+        .expect("a two-letter stub reached the store and was refused");
+    assert!(
+        hits.iter().any(|hit| hit.heading == "Analyzers"),
+        "dropping the stub also dropped the query: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_word_being_typed_is_answered_off_the_index_and_not_off_a_scan() {
+    let Some((mut store, _alone)) = store("t_prefix_path").await else {
+        eprintln!("skipped: DOCS_TEST_NODE is not set");
+        return;
+    };
+    store.ingest(&corpus()).await.expect("ingest");
+
+    // This pass used to be `text ILIKE '%analyz%'` — a full walk of the
+    // collection, which answered correctly and so could never be caught by
+    // looking at its results. The node reports the path it took, which is the
+    // only thing that would.
+    let answers = store
+        .run_with(
+            "SELECT page, heading, anchor, body, text FROM fragment WHERE text MATCHES PREFIX $p LIMIT 10;",
+            vec![(
+                "p".to_owned(),
+                tessaridb_client::Value::String("analyz".to_owned()),
+            )],
+        )
+        .await
+        .expect("a prefix search");
+    let path = access_path(answers.first()).expect("a record answer names its path");
+    assert_ne!(
+        path, "scan",
+        "the word being typed is still walking the collection"
+    );
+}

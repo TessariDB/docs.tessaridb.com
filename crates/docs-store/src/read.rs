@@ -179,25 +179,39 @@ impl Store {
     ///
     /// `MATCHES` asks whether the analyzed text holds every **word** of the
     /// query, and that is the right question once a reader has finished typing
-    /// one. While they are still typing it, it is the wrong one: `vecto` is not
-    /// the word `vector`, so a search over words alone answers a half-typed
-    /// word with nothing at all — which reads as "this site has nothing about
-    /// vectors" rather than as "finish the word".
+    /// one. It is the wrong one twice over: while they are still typing a word,
+    /// `vecto` is not the word `vector`; and when they have finished typing it
+    /// wrongly, `vecter` is not one either. Either way a search over whole words
+    /// answers with nothing at all, which reads as "this site has nothing about
+    /// vectors" rather than as "finish the word" or "check the spelling".
     ///
-    /// So when the ranked pass has not filled the page, the last word is treated
-    /// as a partial one and three things happen in order, each answering a
-    /// narrower question than the one before it could:
+    /// So when the ranked pass has not filled the page, three further passes run
+    /// in order, each answering a question the one before it could not, and each
+    /// worth less than the one before it:
     ///
-    /// 1. a scan finds the fragments whose text holds those characters;
-    /// 2. the words in *those* fragments say which word was being typed, and
-    ///    the index is asked for that word — which is what puts the page about
-    ///    vectors above the page that mentions a test vector in passing. A scan
-    ///    cannot produce that ordering, because a scan has no score;
-    /// 3. anything the completed word did not account for follows, unscored.
+    /// 1. **the word being typed** — the index is asked for the terms beginning
+    ///    with the last word (`MATCHES PREFIX`), and the words in the fragments
+    ///    that come back say which word the reader was most likely typing. The
+    ///    index is then asked for *that* whole word, which is what puts the page
+    ///    about vectors above the page that mentions a test vector in passing;
+    /// 2. anything the completed word did not account for follows, unscored;
+    /// 3. **the word they meant** — `MATCHES FUZZY` over the query as typed,
+    ///    for the case the first two cannot reach: a finished word that is
+    ///    misspelled rather than half-typed.
     ///
     /// Ranked results keep their order and stay first throughout. The passes are
     /// kept apart rather than merged into one statement because they answer
-    /// different questions and are worth different amounts.
+    /// different questions and are worth different amounts — an exact hit must
+    /// never sort below a guess at what the reader meant.
+    ///
+    /// # The floor is the engine's, and it is a refusal
+    ///
+    /// Both `PREFIX` and `FUZZY` refuse a term shorter than three characters
+    /// (`PrefixTooShort`), and they refuse it **per word**: `vector se` is
+    /// refused for `se` even though `vector` is long enough. So a stub shorter
+    /// than the floor is dropped from the query rather than sent — a reader
+    /// part-way through typing `se` is shown what `vector` alone ranks, which is
+    /// both a better answer than an error and a better one than nothing.
     ///
     /// # Errors
     ///
@@ -217,37 +231,49 @@ impl Store {
         let Some((finished, partial)) = split_last_word(query) else {
             return Ok(hits);
         };
-        // Two letters are a prefix of too much to be worth showing, and one is a
-        // prefix of nearly everything. The floor is on the partial word alone:
-        // `vector se` has already narrowed the collection with a whole word.
-        if finished.is_empty() && partial.chars().count() < 3 {
-            return Ok(hits);
-        }
 
-        let scanned = self.scanned(finished, partial, limit).await?;
+        if long_enough(partial) {
+            let prefixed = self.prefixed(finished, partial, limit).await?;
 
-        // Finish the word, then search for it. The scan says which fragments
-        // hold the characters; the words in those fragments say which word the
-        // reader was most likely typing; and asking the index for *that* gets
-        // back the ordering the scan cannot produce — the page about vectors
-        // above the page that mentions a test vector in passing.
-        if let Some(word) = completion(&scanned, partial) {
-            let completed = if finished.is_empty() {
-                word
-            } else {
-                format!("{finished} {word}")
-            };
-            for hit in self.ranked(&completed, limit).await? {
+            // Finish the word, then search for it. The prefix pass says which
+            // fragments hold a word starting with those characters; the words in
+            // those fragments say which word the reader was most likely typing;
+            // and asking the index for *that* gets back an ordering the prefix
+            // pass cannot produce, because `search::score` scores the string it
+            // is handed and `vecto` is not a term the collection holds — it
+            // scores zero for every record that matched.
+            if let Some(word) = completion(&prefixed, partial) {
+                let completed = if finished.is_empty() {
+                    word
+                } else {
+                    format!("{finished} {word}")
+                };
+                for hit in self.ranked(&completed, limit).await? {
+                    push(&mut hits, hit, room);
+                }
+            }
+
+            // Whatever the completed word did not account for. A fragment can
+            // hold a different word under the same prefix — `vectors` where the
+            // word chosen was `vector` — and dropping it because the completion
+            // went the other way would lose a result the reader can plainly see
+            // is there.
+            for found in prefixed {
+                push(&mut hits, found.hit, room);
+            }
+        } else if !finished.is_empty() {
+            // The stub is below the engine's floor, so it is dropped rather than
+            // sent. Ranking the finished words alone is what the reader is part
+            // of the way towards asking for.
+            for hit in self.ranked(finished, limit).await? {
                 push(&mut hits, hit, room);
             }
         }
 
-        // Whatever the completed word did not account for. A fragment can hold
-        // the characters under a different word — `vectors` where the word
-        // chosen was `vector` — and dropping it because the completion went the
-        // other way would lose a result the reader can plainly see is there.
-        for found in scanned {
-            push(&mut hits, found.hit, room);
+        if hits.len() < room {
+            for hit in self.corrected(query, limit).await? {
+                push(&mut hits, hit, room);
+            }
         }
         Ok(hits)
     }
@@ -286,45 +312,49 @@ impl Store {
         hits_of(answers.first())
     }
 
-    /// The fragments whose text holds the characters as typed.
+    /// The fragments holding a word that **begins with** the characters as typed.
     ///
-    /// The partial word is looked for anywhere in the text; every word before it
-    /// is a finished word and is still asked of the index, so `vector sea` looks
-    /// only inside what holds the word `vector`.
+    /// Every word before the partial one is finished, and is still asked of the
+    /// index as a whole word, so `vector sea` looks only inside what holds the
+    /// word `vector`.
     ///
-    /// This is a **scan**, not an index read, and it is affordable here for a
-    /// reason worth writing down rather than assuming: this site is a few
-    /// hundred fragments. On a collection that grows, the pass this stands in
-    /// for is a walk of the term dictionary — a question for the engine and not
-    /// for its documentation. See `02_questions.md`.
+    /// This is an index read. It used to be a `text ILIKE '%partial%'` scan —
+    /// not for want of trying, but because the store had no prefix operator when
+    /// it was written; the scan stood in for one and the comment here said so.
+    /// `MATCHES PREFIX` is that operator, and swapping to it changes two things
+    /// beyond the access path. A scan matched the characters **anywhere in a
+    /// word**, so typing `earch` found `search` — an infix hit the reader cannot
+    /// see the logic of, since they are typing the start of a word and not the
+    /// middle of one. And it read every fragment: affordable on a site of a few
+    /// hundred, and a full walk on any collection that grows.
     ///
     /// The analyzed `text` travels back as well as the `body`, because it is
     /// what the completion is read out of: it opens with the page title and the
     /// heading, so a word a reader is typing is found there whether they are
     /// typing a title or a sentence.
-    async fn scanned(
+    async fn prefixed(
         &mut self,
         finished: &str,
         partial: &str,
         limit: u32,
-    ) -> Result<Vec<Scanned>, Fault> {
-        // `ILIKE` is a pattern over the whole value, so a substring is written
-        // between two `%`. Neither `%` nor `_` can reach it: `split_last_word`
-        // keeps only letters and digits, so a reader cannot turn the pattern
-        // into a wildcard for everything by typing one.
+    ) -> Result<Vec<Found>, Fault> {
+        // The partial word is a **bound value**, exactly as the finished ones
+        // are. It reaches the store as a term to expand and never as syntax.
         let mut parameters = vec![(
             "p".to_owned(),
-            tessaridb_client::Value::String(format!("%{partial}%")),
+            tessaridb_client::Value::String(partial.to_owned()),
         )];
-        // No order to impose: an `ILIKE` yields no score, and inventing one here
-        // would be this code scoring, which `ranked` deliberately does not do.
-        // The store's own order is stable, which is what matters — the same
-        // query twice returns the same page twice.
+        // No order to impose. `search::score` scores the literal it is given, so
+        // scoring the prefix would return zero for every record — measured, not
+        // assumed. Inventing an order here instead would be this code scoring,
+        // which `ranked` deliberately does not do. The store's own order is
+        // stable, which is what matters: the same query twice returns the same
+        // page twice.
         let script = if finished.is_empty() {
             format!(
                 "SELECT page, heading, anchor, body, text
                  FROM fragment
-                 WHERE text ILIKE $p
+                 WHERE text MATCHES PREFIX $p
                  LIMIT {limit};"
             )
         } else {
@@ -335,7 +365,7 @@ impl Store {
             format!(
                 "SELECT page, heading, anchor, body, text
                  FROM fragment
-                 WHERE text MATCHES $q AND text ILIKE $p
+                 WHERE text MATCHES $q AND text MATCHES PREFIX $p
                  LIMIT {limit};"
             )
         };
@@ -343,16 +373,67 @@ impl Store {
         let answers = self.run_with(&script, parameters).await?;
         Ok(records(answers.first())?
             .iter()
-            .map(|(_, value)| Scanned {
+            .map(|(_, value)| Found {
                 hit: hit_of(value),
                 text: text_of(value, "text"),
             })
             .collect())
     }
+
+    /// The fragments holding the word the reader probably meant.
+    ///
+    /// `MATCHES FUZZY` accepts a term within two edits of each word given, with
+    /// the first three characters held exact. It is the last pass and its
+    /// results are appended unscored, which is the whole of its precedence: a
+    /// guess at a misspelling must never displace a word the reader actually
+    /// typed and the collection actually holds.
+    ///
+    /// It is asked for only when every word clears the engine's three-character
+    /// floor, because that floor is a **refusal** rather than a narrowing — one
+    /// short word turns the statement into an error for the whole query. A query
+    /// that does not clear it simply gets no fuzzy pass.
+    ///
+    /// This is what answers `vecter`, which the prefix pass cannot: a misspelled
+    /// word is not a prefix of the right one.
+    async fn corrected(&mut self, query: &str, limit: u32) -> Result<Vec<Hit>, Fault> {
+        if !query.split_whitespace().all(long_enough) {
+            return Ok(Vec::new());
+        }
+        let script = format!(
+            "SELECT page, heading, anchor, body
+             FROM fragment
+             WHERE text MATCHES FUZZY $q
+             LIMIT {limit};"
+        );
+        let answers = self
+            .run_with(
+                &script,
+                vec![(
+                    "q".to_owned(),
+                    tessaridb_client::Value::String(query.to_owned()),
+                )],
+            )
+            .await?;
+        hits_of(answers.first())
+    }
 }
 
-/// A scanned fragment: the hit it makes, and the text it was found in.
-struct Scanned {
+/// Whether a word clears the store's three-character floor for `PREFIX` and
+/// `FUZZY`.
+///
+/// Below it the store **refuses** the statement rather than narrowing it, so
+/// this is asked before the term is sent and not after the error comes back.
+/// Counted in characters rather than bytes: the floor is on the term as the
+/// store reads it, and `длин` is four characters and eight bytes.
+fn long_enough(word: &str) -> bool {
+    word.chars()
+        .filter(|character| character.is_alphanumeric())
+        .count()
+        >= 3
+}
+
+/// A fragment found by prefix: the hit it makes, and the text it was found in.
+struct Found {
     hit: Hit,
     text: String,
 }
@@ -376,20 +457,21 @@ fn push(hits: &mut Vec<Hit>, hit: Hit, room: usize) {
 
 /// The word the reader is most likely part-way through typing.
 ///
-/// Read out of the text the scan found rather than out of a dictionary,
-/// because the store has no way to be asked for its terms — see `scanned`. A
-/// word counts when it **begins** with what was typed: an infix match is what
-/// the scan is for, and completing `earch` to `search` would be a guess about
-/// what the reader meant rather than a reading of what they wrote.
+/// Read out of the text the prefix pass found rather than out of a dictionary,
+/// because this code cannot ask the store for its terms — the statement it can
+/// write returns records, not the vocabulary behind them. A word counts when it
+/// **begins** with what was typed, which is the same question the prefix pass
+/// asked; completing `earch` to `search` would be a guess about what the reader
+/// meant rather than a reading of what they wrote.
 ///
 /// Ties break on the shorter word and then alphabetically, so the same corpus
 /// and the same keystrokes always choose the same word — a completion that
 /// wobbled between two spellings would reorder the page under the reader's
 /// hands as they typed.
-fn completion(scanned: &[Scanned], partial: &str) -> Option<String> {
+fn completion(prefixed: &[Found], partial: &str) -> Option<String> {
     let typed = partial.to_lowercase();
     let mut counted: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for found in scanned {
+    for found in prefixed {
         for word in found
             .text
             .split(|character: char| !character.is_alphanumeric())
@@ -476,12 +558,12 @@ mod tests {
 
     use tessaridb_client::{Number, Value};
 
-    use super::{Hit, Scanned, completion, non_empty, relevance_of, split_last_word};
+    use super::{Found, Hit, completion, long_enough, non_empty, relevance_of, split_last_word};
 
-    fn scanned(texts: &[&str]) -> Vec<Scanned> {
+    fn prefixed(texts: &[&str]) -> Vec<Found> {
         texts
             .iter()
-            .map(|text| Scanned {
+            .map(|text| Found {
                 hit: Hit {
                     page: String::new(),
                     heading: String::new(),
@@ -498,7 +580,7 @@ mod tests {
     fn the_word_being_typed_is_read_out_of_the_text_it_was_found_in() {
         // `vector` twice against `vectors` once, so `vector` is the word to ask
         // the index for.
-        let found = scanned(&["Vectors and a vector index", "a vector is a list"]);
+        let found = prefixed(&["Vectors and a vector index", "a vector is a list"]);
         assert_eq!(completion(&found, "vecto"), Some("vector".to_owned()));
         // Case is not a difference: the analyzer folds it, and so does this.
         assert_eq!(completion(&found, "VECT"), Some("vector".to_owned()));
@@ -509,22 +591,55 @@ mod tests {
         // Once each, so the count decides nothing. Without a tie-break the
         // choice would follow map order and the page would reorder itself as
         // the reader typed — the same keystrokes, a different answer.
-        let found = scanned(&["a vector and a vectorised list"]);
+        let found = prefixed(&["a vector and a vectorised list"]);
         assert_eq!(completion(&found, "vecto"), Some("vector".to_owned()));
     }
 
     #[test]
     fn the_letters_inside_a_word_do_not_complete_it() {
-        // The scan matches an infix; the completion does not. Turning `earch`
-        // into `search` would be a guess about what the reader meant rather
-        // than a reading of what they wrote — and the scan already returns the
-        // fragment, so nothing is lost by declining to guess.
-        let found = scanned(&["full-text search"]);
+        // Both the prefix pass and the completion ask the same question, which
+        // is the point of the pair: turning `earch` into `search` would be a
+        // guess about what the reader meant rather than a reading of what they
+        // wrote. The scan this replaced did match an infix, so this assertion
+        // used to describe a difference between the two passes and now
+        // describes their agreement.
+        let found = prefixed(&["full-text search"]);
         assert_eq!(completion(&found, "earch"), None);
         // A word that is exactly what was typed is not a completion either: the
         // ranked pass has already asked the index for that word and come back
         // short, so asking again is a second round trip for the same answer.
         assert_eq!(completion(&found, "search"), None);
+    }
+
+    #[test]
+    fn the_engines_three_character_floor_is_checked_before_a_term_is_sent() {
+        // `PREFIX` and `FUZZY` REFUSE a term below three characters rather than
+        // narrowing it, and they refuse per word — so one short word turns the
+        // whole statement into an error. Asking here is what keeps a reader
+        // part-way through typing from being shown a refusal.
+        assert!(!long_enough("a"));
+        assert!(!long_enough("se"));
+        assert!(long_enough("vec"));
+        assert!(long_enough("vector"));
+    }
+
+    #[test]
+    fn the_floor_counts_characters_and_not_bytes() {
+        // The store's floor is on the term as it reads it. Counting bytes would
+        // let a three-character Cyrillic word through as if it were six and get
+        // the statement refused, and would reject nothing that should pass —
+        // the failure would look like an error on one language only.
+        assert!(long_enough("длин"));
+        assert!(!long_enough("до"));
+    }
+
+    #[test]
+    fn punctuation_does_not_lift_a_word_over_the_floor() {
+        // The analyzer splits on non-alphanumerics, so `s.e.` is two one-letter
+        // terms and not a four-character word. Counting the punctuation would
+        // send a term the store then refuses.
+        assert!(!long_enough("s.e."));
+        assert!(!long_enough("a-b"));
     }
 
     #[test]
