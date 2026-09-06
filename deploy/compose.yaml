@@ -69,7 +69,19 @@ services:
     # DOCS_NAMESPACE at `v0_0_2_alpha`, its two service users, and this line at
     # `0.0.2-alpha` — all three together, and with an `api` from before this
     # commit.
-    image: tessaridb/tessaridb:0.0.3-alpha
+    #
+    # Moved to 0.0.4-alpha on 2026-09-06, and this one is NOT like the last two.
+    # That release is a single performance fix — full-text search 5.6x faster
+    # because the stemmer stopped allocating on every suffix test — and it
+    # changes no operator, no grammar and no on-disk format. So this is an
+    # upgrade **in place**: the namespace stays `v0_0_3_alpha`, the service users
+    # stay as they are, no reindex is needed and no `api` rebuild is needed.
+    # Rolling back is this line alone.
+    #
+    # The property that makes that safe was measured rather than assumed: an
+    # index written by the 0.0.3-alpha stemmer answers the same records under
+    # 0.0.4-alpha, byte-for-byte, because the stems themselves did not change.
+    image: tessaridb/tessaridb:0.0.4-alpha
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is in a different container. That is
@@ -135,7 +147,7 @@ services:
   # pretend.
   init:
     profiles: ["init"]
-    image: tessaridb/tessaridb:0.0.3-alpha
+    image: tessaridb/tessaridb:0.0.4-alpha
     environment:
       TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
     command:
