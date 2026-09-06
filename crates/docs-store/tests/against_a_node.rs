@@ -840,3 +840,94 @@ async fn a_corrected_word_is_ranked_and_not_merely_returned() {
         "the leading hit is unscored, so it came from the raw fuzzy pass: {first:?}"
     );
 }
+
+/// A node with users on it, which the tests above deliberately do not need.
+///
+/// Signing in is the only thing this file cannot ask an open store, because a
+/// store's first user closes it for everyone — so a second node is cheaper than
+/// making every test above carry a credential. Point `DOCS_TEST_CLOSED_NODE` at
+/// one and name the account:
+///
+/// ```text
+/// TESSARIDB_INITIAL_USER=owner TESSARIDB_INITIAL_PASSWORD='a long one' \
+///   tessaridb /tmp/closed --serve 127.0.0.1:47911 --http 127.0.0.1:47912
+/// curl -u 'owner:a long one' -X POST --data-binary \
+///   'DEFINE NAMESPACE IF NOT EXISTS t_signed_in; USE NAMESPACE t_signed_in;
+///    DEFINE DATABASE IF NOT EXISTS docs;' http://127.0.0.1:47912/script
+/// DOCS_TEST_CLOSED_NODE=127.0.0.1:47911 DOCS_TEST_USER=owner \
+///   DOCS_TEST_PASSWORD='a long one' cargo test -p docs-store
+/// ```
+///
+/// The namespace is declared by hand for the same reason the deployment has an
+/// `init` profile: on a closed store `USE NAMESPACE` is a tenancy check, so a
+/// name that does not exist yet is refused before `migrate` ever gets to create
+/// it. Production declares it once, ahead of the API's first connection.
+async fn closed_store(namespace: &str) -> Option<(Store, tokio::sync::MutexGuard<'static, ()>)> {
+    let address = std::env::var("DOCS_TEST_CLOSED_NODE").ok()?;
+    let name = std::env::var("DOCS_TEST_USER").ok()?;
+    let password = std::env::var("DOCS_TEST_PASSWORD").ok()?;
+    let alone = NODE.lock().await;
+    let store = Store::connect(&address, namespace, Some((name, password)))
+        .await
+        .expect("connect to the node named by DOCS_TEST_CLOSED_NODE");
+    Some((store, alone))
+}
+
+#[tokio::test]
+async fn a_connection_stays_signed_in_after_the_password_is_spent() {
+    let Some((mut store, _alone)) = closed_store("t_signed_in").await else {
+        eprintln!("skipped: DOCS_TEST_CLOSED_NODE is not set");
+        return;
+    };
+
+    // `connect` already ran a statement, so the password is spent by the time
+    // this test gets the store. Everything below therefore travels without one,
+    // and a closed store refuses an anonymous statement — so these succeeding
+    // is the proof that the session outlived the credential rather than that
+    // the store was open all along.
+    store.migrate().await.expect("the schema applies unsigned");
+    store
+        .ingest(&corpus())
+        .await
+        .expect("a write, still as the signed-in user");
+    assert_eq!(
+        store.pages_held().await.expect("a count"),
+        2,
+        "a read after the credential was spent"
+    );
+    assert!(
+        !store
+            .search("analyzer", 5)
+            .await
+            .expect("a search")
+            .is_empty(),
+        "a parameterised statement also runs on the session rather than on a credential"
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_password_is_refused_rather_than_falling_through_to_anonymous() {
+    let Some(address) = std::env::var("DOCS_TEST_CLOSED_NODE").ok() else {
+        eprintln!("skipped: DOCS_TEST_CLOSED_NODE is not set");
+        return;
+    };
+    let Some(name) = std::env::var("DOCS_TEST_USER").ok() else {
+        eprintln!("skipped: DOCS_TEST_USER is not set");
+        return;
+    };
+    let _alone = NODE.lock().await;
+
+    // Spending the credential must not become a way to lose it. A sign-in that
+    // the node refuses has to end the connection, not leave one that quietly
+    // reads as nobody — which on an open store would even appear to work.
+    let refused = Store::connect(
+        &address,
+        "t_wrong_password",
+        Some((name, "not the password".to_owned())),
+    )
+    .await;
+    assert!(
+        refused.is_err(),
+        "a wrong password opened a usable connection"
+    );
+}

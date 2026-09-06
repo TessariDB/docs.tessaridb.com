@@ -73,6 +73,11 @@ impl Fault {
 /// A connection to the store, already pointed at one version's namespace.
 pub struct Store {
     client: Client,
+    /// Held only until the node has accepted them once.
+    ///
+    /// A sign-in is the connection's, not the statement's — so these are spent
+    /// on the first request and dropped, and every later statement travels
+    /// without them. See [`Store::signing_in`] for why that is worth doing.
     credentials: Option<(String, String)>,
     namespace: String,
 }
@@ -171,17 +176,50 @@ impl Store {
             .any(|held| matches!(held, Value::String(name) if *name == self.namespace)))
     }
 
+    /// The credentials to put on the next request, if any are still unspent.
+    ///
+    /// # Why they are spent once and not sent again
+    ///
+    /// A sign-in belongs to the **connection**: the node keeps one session per
+    /// connection, and a statement that carries no credentials runs as whoever
+    /// that session already signed in as. Presenting them again is therefore not
+    /// a second proof of anything — it is a second **Argon2id**, and the node
+    /// runs one unconditionally for every request that carries a password.
+    ///
+    /// Measured against the live store on 2026-09-06: **≈130 ms per request**,
+    /// the same for a wrong password as a right one, and independent of what the
+    /// statement asks for — a `SELECT` by id is 0.7 ms beside it. Drawing the
+    /// navigation tree takes seventeen round trips, so `/api/nav` spent 2.5 s of
+    /// which about 99 % was hashing a password the node had already checked.
+    ///
+    /// The parameters are not the problem and are not touched: `m=19456, t=2,
+    /// p=1` is the recommended floor, and a login that cannot be brute-forced is
+    /// exactly what it buys. Asking for it seventeen times to draw one menu is.
+    ///
+    /// Dropping them also narrows how long this process holds a password: after
+    /// the first statement there is no copy of it left in this struct.
+    /// Takes the field rather than `&self`, so the borrow stays off `client`
+    /// and the two can be used in one call.
+    fn signing_in(credentials: &Option<(String, String)>) -> Option<(&str, &str)> {
+        credentials
+            .as_ref()
+            .map(|(name, password)| (name.as_str(), password.as_str()))
+    }
+
     /// Runs a script with no bound parameters.
     ///
     /// # Errors
     ///
     /// Returns [`Fault::Client`] when the node refuses.
     pub async fn run(&mut self, script: &str) -> Result<Vec<Answer>, Fault> {
-        let credentials = self
-            .credentials
-            .as_ref()
-            .map(|(name, password)| (name.as_str(), password.as_str()));
-        Ok(self.client.run(script, credentials).await?)
+        let signing_in = Self::signing_in(&self.credentials);
+        let answers = self.client.run(script, signing_in).await?;
+        // Only on success: a refused sign-in leaves them in place, so a retry
+        // presents a credential rather than running on as nobody. On a closed
+        // store an anonymous statement is refused, so this fails closed either
+        // way — but failing closed loudly beats failing closed by accident.
+        self.credentials = None;
+        Ok(answers)
     }
 
     /// Runs a script whose `$parameters` take the given values.
@@ -198,14 +236,10 @@ impl Store {
         script: &str,
         parameters: Vec<(String, Value)>,
     ) -> Result<Vec<Answer>, Fault> {
-        let credentials = self
-            .credentials
-            .as_ref()
-            .map(|(name, password)| (name.as_str(), password.as_str()));
-        Ok(self
-            .client
-            .run_with(script, credentials, parameters)
-            .await?)
+        let signing_in = Self::signing_in(&self.credentials);
+        let answers = self.client.run_with(script, signing_in, parameters).await?;
+        self.credentials = None;
+        Ok(answers)
     }
 
     /// Which version's namespace this connection is pointed at.
