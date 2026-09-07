@@ -52,7 +52,7 @@ export async function GET(): Promise<Response> {
 
 ## Facts worth getting right
 
-- **Licence: BUSL-1.1**, change date 2030-08-24, change licence Apache-2.0. All
+- **Licence: BUSL-1.1**, change date 2030-09-07, change licence Apache-2.0. All
   production use is free, **including commercial use inside a company**. The one
   restriction is providing TessariDB to third parties as a database service. The
   client SDK and the wire protocol are Apache-2.0.

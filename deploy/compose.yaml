@@ -81,7 +81,24 @@ services:
     # The property that makes that safe was measured rather than assumed: an
     # index written by the 0.0.3-alpha stemmer answers the same records under
     # 0.0.4-alpha, byte-for-byte, because the stems themselves did not change.
-    image: tessaridb/tessaridb:0.0.4-alpha
+    #
+    # Moved to 0.0.5-alpha on 2026-09-07, and it is the same kind of move as the
+    # last one: an upgrade **in place**. That release changes no operator, no
+    # grammar and no on-disk format — it is four read-path performance fixes and
+    # one correctness fix — so the namespace stays `v0_0_3_alpha`, the service
+    # users stay as they are, no reindex is needed and no `api` rebuild is
+    # needed. Rolling back is this line and the `init` one alone.
+    #
+    # The correctness fix is worth knowing about here because it is the one
+    # thing in the release that changes an answer: a record updated into a match
+    # inside its own transaction was missing from a full-text read served by an
+    # index. The site publishes inside a transaction, so this is a fix the site
+    # actually wanted.
+    #
+    # Verified before the switch rather than after: the store was backed up, a
+    # copy was opened cold under 0.0.5-alpha, and its pages and search answers
+    # were compared against the running node's.
+    image: tessaridb/tessaridb:0.0.5-alpha
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is in a different container. That is
@@ -147,7 +164,7 @@ services:
   # pretend.
   init:
     profiles: ["init"]
-    image: tessaridb/tessaridb:0.0.4-alpha
+    image: tessaridb/tessaridb:0.0.5-alpha
     environment:
       TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
     command:
