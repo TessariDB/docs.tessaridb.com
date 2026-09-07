@@ -30,7 +30,7 @@ export const product = "https://tessaridb.com";
  * looks like this one and is not: it names the store's namespace, so changing it
  * moves the site's content to a new namespace rather than relabelling anything.
  */
-export const version = "0.0.3-alpha";
+export const version = "0.0.5-alpha";
 
 /** What this site is, in one sentence, wherever one is needed. */
 export const tagline =
