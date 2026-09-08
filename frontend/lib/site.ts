@@ -30,8 +30,8 @@ export const product = "https://tessaridb.com";
  * looks like this one and is not: it names the store's namespace, so changing it
  * moves the site's content to a new namespace rather than relabelling anything.
  */
-export const version = "0.0.5-alpha";
+export const version = "0.0.6-beta";
 
 /** What this site is, in one sentence, wherever one is needed. */
 export const tagline =
-  "The documentation for TessariDB — a multi-model database engine in Rust: documents, graph, full-text, vectors, geometry, key-value, files and time over one store, reached by one language.";
+  "The documentation for TessariDB — a multi-model database engine in Rust: documents, graph, full-text, vectors, geometry, key-value, files, time and a vault over one store, reached by one language.";
