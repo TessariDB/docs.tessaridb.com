@@ -98,7 +98,34 @@ services:
     # Verified before the switch rather than after: the store was backed up, a
     # copy was opened cold under 0.0.5-alpha, and its pages and search answers
     # were compared against the running node's.
-    image: tessaridb/tessaridb:0.0.5-alpha
+    #
+    # Moved to 0.0.6-beta on 2026-09-08. Same kind of move again — an upgrade
+    # **in place**, so the namespace stays `v0_0_3_alpha`, the service users stay
+    # as they are, no reindex is needed and no `api` rebuild is needed. Rolling
+    # back is this line and the `init` one alone.
+    #
+    # That release is the vault engine, and everything it adds is an addition:
+    # `DEFINE VAULT`, `REVEAL`, `UNSEAL`, `INFO FOR AUDIT`, `RECIPIENTS OF`, and
+    # a field name that may be quoted. Nothing this site writes or reads changes
+    # meaning, and no on-disk format moved.
+    #
+    # The suffix went from `alpha` to `beta` with this release. That is a naming
+    # change and not a compatibility promise: versions before 1.0 still promise
+    # nothing across a format change, which is exactly why this comment exists.
+    #
+    # Verified before the switch, on a cold copy, and by comparison rather than
+    # by inspection: all 46 page records came back **byte-identical** under both
+    # engines (sha256 `e57c016b…` on each), and all four search shapes the site
+    # serves — `MATCHES`, `MATCHES PREFIX`, `MATCHES FUZZY` and a second plain
+    # term — returned identical record sets, all still answered via index. The
+    # reader account authenticated against the copy, which is what proves the
+    # user catalog survived; `init` answering `ok` would have proved nothing.
+    #
+    # The PREFIX and FUZZY rows are not ceremony. W88 measured a store that
+    # opened fine under a newer engine and answered both with no records and no
+    # error, because the term dictionary the operators need had never been
+    # written. A bare `image:` bump comes up green through exactly that.
+    image: tessaridb/tessaridb:0.0.6-beta
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is in a different container. That is
@@ -164,7 +191,10 @@ services:
   # pretend.
   init:
     profiles: ["init"]
-    image: tessaridb/tessaridb:0.0.5-alpha
+    # Kept equal to the `db` image above, deliberately: this runs as a client
+    # against that node, and a client from a different release is a difference
+    # nobody planned for on the one path that declares accounts.
+    image: tessaridb/tessaridb:0.0.6-beta
     environment:
       TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
     command:

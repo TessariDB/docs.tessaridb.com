@@ -39,11 +39,30 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE=(docker compose -f "${HERE}/compose.yaml" --env-file "${HERE}/.env")
 INTO="${DOCS_BACKUP_DIR:-/var/backups/docs}"
 KEEP="${DOCS_BACKUP_KEEP:-14}"
-# The published engine, and the same version `compose.yaml` runs the store with.
-# A different one here would read the store with an engine the deployment has
-# never used, which is the one moment you would not want to discover a format
-# difference.
-IMAGE="${DOCS_DB_IMAGE:-tessaridb/tessaridb:0.0.3-alpha}"
+# The published engine, read out of `compose.yaml` rather than repeated here.
+#
+# It has to be the same version the store runs, because a backup is verified by
+# an engine and an older one refuses a newer file rather than guessing at it —
+# correctly. This was a literal until 2026-09-08, and it drifted: the pin moved
+# to 0.0.4-alpha and then 0.0.5-alpha while this line stayed at 0.0.3-alpha, so
+# for two nights the node wrote a good log, the check refused to read it, and
+# the script discarded it and exited 0. Nothing was in an error state and the
+# site had no backup:
+#
+#   this backup was written by version 0.0.5; this build is 0.0.3 and will not
+#   guess at what a newer one meant
+#
+# A copy of a value that must equal another value is a defect waiting for
+# somebody to move one of them, so it is derived. `DOCS_DB_IMAGE` still
+# overrides, which is what makes reading an older store possible on purpose.
+IMAGE="${DOCS_DB_IMAGE:-}"
+if [[ -z "${IMAGE}" ]]; then
+  IMAGE="$(sed -n 's|^[[:space:]]*image:[[:space:]]*\(tessaridb/tessaridb:[^[:space:]]*\).*|\1|p' "${HERE}/compose.yaml" | head -1)"
+fi
+if [[ -z "${IMAGE}" ]]; then
+  log "no engine image found in compose.yaml and DOCS_DB_IMAGE is unset"
+  exit 1
+fi
 
 log() { printf 'backup: %s\n' "$*" >&2; }
 
