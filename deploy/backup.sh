@@ -26,7 +26,7 @@
 #
 #   docker compose ... stop db
 #   docker run --rm --user 0:0 -v "$STORE:/store" -v "$INTO:/out" \
-#     tessaridb/tessaridb:0.0.3-alpha /store/store --backup /out/manual.tessalog
+#     tessaridb/tessaridb:0.0.3-alpha /store/store --backup /out/manual.tessarilog
 #   docker compose ... start db
 #
 # Two halves in two places, and not by preference: `xxd` is not in the database
@@ -70,7 +70,7 @@ mkdir -p "${INTO}"
 chmod 700 "${INTO}"
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-FILE="${INTO}/${STAMP}.tessalog"
+FILE="${INTO}/${STAMP}.tessarilog"
 # Written aside and moved into place only once it has been checked, so the
 # directory never holds a file that has not been read back.
 WORKING="${FILE}.partial"
@@ -106,7 +106,13 @@ log "kept ${FILE} ($(stat -c %s "${FILE}") bytes)"
 
 # Oldest first, and only whole files — a `.partial` left by a failed run is
 # removed above, never rotated.
-mapfile -t OLD < <(ls -1t "${INTO}"/*.tessalog 2>/dev/null | tail -n "+$((KEEP + 1))")
+#
+# Both extensions are listed on purpose. The suffix was `.tessalog` until the
+# name was corrected, and the files written under it are still here and still
+# restorable. A glob that matched only the new one would leave them out of the
+# count and out of the rotation, so they would accumulate until the disk filled
+# — which looks like nothing at all right up until it looks like an outage.
+mapfile -t OLD < <(ls -1t "${INTO}"/*.tessarilog "${INTO}"/*.tessalog 2>/dev/null | tail -n "+$((KEEP + 1))")
 for stale in "${OLD[@]:-}"; do
   [ -n "${stale}" ] || continue
   rm -f "${stale}"
