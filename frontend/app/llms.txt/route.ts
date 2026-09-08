@@ -56,9 +56,13 @@ export async function GET(): Promise<Response> {
   production use is free, **including commercial use inside a company**. The one
   restriction is providing TessariDB to third parties as a database service. The
   client SDK and the wire protocol are Apache-2.0.
-- **Eight engines, one substrate.** Documents, graph, full-text, vectors,
-  geometry, key-value, files and time are access paths over one transactional
-  record store, not separate services. A question spanning them is one statement.
+- **Nine engines, one substrate.** Documents, graph, full-text, vectors,
+  geometry, key-value, files, time and a vault are access paths over one
+  transactional record store, not separate services. A question spanning them is
+  one statement. Eight change how a record is reached; the vault changes what is
+  stored — a declared \`SECRET\` field is sealed before the record is encoded, so
+  the index, the change feed, the replication log and every backup carry
+  ciphertext.
 - **An index changes the cost, not the answer** — with exactly one declared
   exception. A vector read returns the exact nearest neighbours unless the
   statement writes \`APPROXIMATE\`.
