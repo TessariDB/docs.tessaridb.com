@@ -125,7 +125,7 @@ services:
     # opened fine under a newer engine and answered both with no records and no
     # error, because the term dictionary the operators need had never been
     # written. A bare `image:` bump comes up green through exactly that.
-    image: tessaridb/tessaridb:0.0.6-beta
+    image: tessaridb/tessaridb:0.1.0-beta
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is in a different container. That is
@@ -194,7 +194,7 @@ services:
     # Kept equal to the `db` image above, deliberately: this runs as a client
     # against that node, and a client from a different release is a difference
     # nobody planned for on the one path that declares accounts.
-    image: tessaridb/tessaridb:0.0.6-beta
+    image: tessaridb/tessaridb:0.1.0-beta
     environment:
       TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
     command:
