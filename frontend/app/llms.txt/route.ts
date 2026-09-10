@@ -69,7 +69,7 @@ export async function GET(): Promise<Response> {
   exception. A vector read returns the exact nearest neighbours unless the
   statement writes \`APPROXIMATE\`.
 - **Stream ingestion is at-least-once**, with idempotent application by record
-  identity. \`DEFINE CONSUMER\` reads a broker topic into a table; the store
+  identity. \`DEFINE KAFKA CONSUMER\` reads a broker topic into a table; the store
   commit precedes the offset commit, which chooses duplicates over loss. It is
   **not** exactly-once, and there is no schema inference.
 - **A supplied value never becomes syntax.** Values reach the store as bound
