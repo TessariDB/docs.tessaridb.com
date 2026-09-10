@@ -52,15 +52,17 @@ export async function GET(): Promise<Response> {
 
 ## Facts worth getting right
 
-- **Licence: BUSL-1.1**, change date 2030-09-07, change licence Apache-2.0. All
+- **Licence: BUSL-1.1**, change date 2030-09-08, change licence Apache-2.0. All
   production use is free, **including commercial use inside a company**. The one
   restriction is providing TessariDB to third parties as a database service. The
   client SDK and the wire protocol are Apache-2.0.
-- **Nine engines, one substrate.** Documents, graph, full-text, vectors,
-  geometry, key-value, files, time and a vault are access paths over one
-  transactional record store, not separate services. A question spanning them is
-  one statement. Eight change how a record is reached; the vault changes what is
-  stored — a declared \`SECRET\` field is sealed before the record is encoded, so
+- **Ten engines, one substrate.** Documents, graph, full-text, vectors,
+  geometry, key-value, files, time-series, queues and a vault are access paths
+  over one transactional record store, not separate services. A question spanning
+  them is one statement. Seven change how a record is reached; the other three
+  change something else — a series changes what the store will answer with, a
+  queue changes who may reach a record and until when, and the vault changes what
+  is stored — a declared \`SECRET\` field is sealed before the record is encoded, so
   the index, the change feed, the replication log and every backup carry
   ciphertext.
 - **An index changes the cost, not the answer** — with exactly one declared
