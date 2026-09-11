@@ -125,7 +125,21 @@ services:
     # opened fine under a newer engine and answered both with no records and no
     # error, because the term dictionary the operators need had never been
     # written. A bare `image:` bump comes up green through exactly that.
-    image: tessaridb/tessaridb:0.1.0-beta
+    #
+    # Moved to 0.1.1-beta on 2026-09-11. An upgrade **in place** again: the
+    # namespace stays `v0_0_3_alpha`, the service users stay as they are, no
+    # reindex is needed and no `api` rebuild is needed. Rolling back is this
+    # line and the `init` one alone.
+    #
+    # That release is additive — `UPDATE … WHERE` as a compare-and-set, the two
+    # clauses `DEFINE QUEUE` lacked, a record release naming its consumer — plus
+    # two correctness fixes. Neither fix is on a path this site takes: one is a
+    # queue write that could drop a hold, and this site declares no queue; the
+    # other is a file route that could delete a record out of an ordinary table,
+    # and this site serves no files. So the reason to move is currency rather
+    # than need — worth saying out loud, because "nothing here changes" is
+    # exactly the thought that skips the verification below.
+    image: tessaridb/tessaridb:0.1.1-beta
     environment:
       TESSARIDB_STORE: /var/lib/tessaridb/store
       # Every interface, because the API is in a different container. That is
@@ -194,7 +208,7 @@ services:
     # Kept equal to the `db` image above, deliberately: this runs as a client
     # against that node, and a client from a different release is a difference
     # nobody planned for on the one path that declares accounts.
-    image: tessaridb/tessaridb:0.1.0-beta
+    image: tessaridb/tessaridb:0.1.1-beta
     environment:
       TESSARIDB_PASSWORD: ${DOCS_OWNER_PASSWORD:?set it in deploy/.env}
     command:
